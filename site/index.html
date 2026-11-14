@@ -1,0 +1,730 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>cyberviber — every Claude, at a glance</title>
+<meta name="description" content="A 2.4″ ESP32 touch display that lists running Claude Code sessions with their state and focuses a session's terminal when you tap it.">
+<meta name="theme-color" content="#0b0b10">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=JetBrains+Mono:wght@400;500;700;800&display=swap" rel="stylesheet">
+<style>
+:root{
+  --bg:#1a1b26;--bg2:#16161e;--surface:#24283b;--border:#3b4261;--fg:#c0caf5;--muted:#565f89;
+  --accent:#7aa2f7;--red:#f7768e;--yellow:#e0af68;--green:#9ece6a;
+  --ink:#0b0b10;--paper:#ecebe6;--dim:#8a8a99;
+  --mono:'JetBrains Mono',ui-monospace,Menlo,monospace;
+  --serif:'Instrument Serif',Georgia,serif;
+  --pad:max(clamp(16px,4vw,56px),calc((100vw - 1360px)/2));
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html{scroll-behavior:smooth}
+body{background:var(--ink);color:var(--paper);font-family:var(--mono);font-size:14px;line-height:1.6;overflow-x:hidden;-webkit-font-smoothing:antialiased}
+body.light{--ink:#f2f0ea;--paper:#1c1c24;--dim:#6b6b78}
+::selection{background:var(--accent);color:var(--ink)}
+a{color:inherit}
+em{font-family:var(--serif);font-style:italic;font-weight:400;letter-spacing:0}
+code,kbd{font-family:var(--mono)}
+
+/* grain + vignette */
+body::before{content:'';position:fixed;inset:-50%;z-index:100;pointer-events:none;opacity:.07;
+  background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='3' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 1 0 0 0 0 1 0 0 0 0 1 0 0 0 .9 0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+  animation:grain 1.2s steps(6) infinite}
+body.light::before{opacity:.12;mix-blend-mode:multiply;filter:invert(1)}
+@keyframes grain{0%{transform:translate(0,0)}20%{transform:translate(-3%,2%)}40%{transform:translate(2%,-4%)}60%{transform:translate(-4%,-1%)}80%{transform:translate(3%,3%)}}
+
+/* nav */
+nav{position:fixed;top:0;left:0;right:0;z-index:50;display:flex;align-items:center;justify-content:space-between;padding:14px var(--pad);font-size:12px;
+  background:linear-gradient(var(--ink) 30%,transparent);}
+nav .mark{font-weight:800;letter-spacing:-.3px;text-decoration:none;font-size:14px}
+nav .mark b{color:var(--accent)}
+nav .links{display:flex;gap:22px}
+nav .links a{text-decoration:none;color:var(--dim);transition:color .2s}
+nav .links a:hover{color:var(--accent)}
+@media (max-width:640px){nav .links a:not(.gh){display:none}}
+
+/* hero */
+.hero{position:relative;min-height:100svh;display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.05fr);align-items:center;gap:20px;padding:90px var(--pad) 40px;overflow:hidden}
+h1{font-family:var(--serif);font-weight:400;font-size:clamp(54px,8.6vw,104px);line-height:.88;letter-spacing:-.035em;margin:22px 0 26px}
+h1 .m{font-family:var(--mono);font-weight:800;font-size:.52em;letter-spacing:-.06em;vertical-align:.12em;color:var(--accent)}
+h1 em{color:var(--accent)}
+.lede{max-width:520px;color:var(--dim);font-size:15px}
+.lede b{color:var(--paper);font-weight:500}
+.ctas{display:flex;flex-wrap:wrap;gap:12px;margin-top:34px}
+.btn{display:inline-flex;align-items:center;gap:10px;padding:12px 18px;border:1px solid var(--paper);text-decoration:none;font-size:13px;font-weight:700;transition:all .2s;background:transparent;color:var(--paper);cursor:pointer;font-family:inherit}
+.btn.pri{background:var(--accent);border-color:var(--accent);color:var(--ink)}
+.btn:hover{transform:translate(-2px,-2px);box-shadow:4px 4px 0 var(--accent)}
+.btn.pri:hover{box-shadow:4px 4px 0 var(--paper)}
+
+.stage{position:relative;height:min(74vh,720px);min-height:440px;margin-bottom:40px}
+#gl{position:absolute;inset:0;width:100%;height:100%;cursor:grab;touch-action:pan-y}
+#gl:active{cursor:grabbing}
+.hud{position:absolute;font-size:10px;letter-spacing:1.5px;color:var(--dim);text-transform:uppercase;pointer-events:none;line-height:1.7}
+.hud b{color:var(--accent);font-weight:500}
+.hud.tl{top:4%;left:2%}
+.hud.tl::before{content:'';position:absolute;width:10px;height:10px;border:1px solid var(--accent);top:-10px;left:-10px;border-right:0;border-bottom:0}
+.fallback{position:absolute;inset:0;display:none;align-items:center;justify-content:center}
+.no-gl .fallback{display:flex}.no-gl #gl{display:none}
+.ctl3d{position:absolute;left:50%;transform:translateX(-50%);bottom:-52px;width:100%;display:flex;gap:6px;flex-wrap:wrap;justify-content:center;z-index:2}
+.chip{border:1px solid color-mix(in srgb,var(--paper) 20%,transparent);background:color-mix(in srgb,var(--ink) 70%,transparent);color:var(--dim);font:inherit;font-size:11px;padding:5px 10px;cursor:pointer;transition:all .15s;backdrop-filter:blur(6px)}
+.chip:hover{color:var(--paper);border-color:var(--paper)}
+.chip.on{color:var(--accent);border-color:var(--accent)}
+@media (max-width:900px){
+  .hero{grid-template-columns:1fr;padding-top:80px}
+  .stage{height:62vh;min-height:420px;order:-1;margin:0 calc(-1*var(--pad))}
+  .hud{display:none}
+}
+
+
+/* divider: hairline with tick marks */
+.rule{height:14px;margin:0 var(--pad);border-top:1px solid color-mix(in srgb,var(--paper) 18%,transparent);
+  background:repeating-linear-gradient(90deg,color-mix(in srgb,var(--paper) 18%,transparent) 0 1px,transparent 1px 80px) top/100% 14px no-repeat,
+             repeating-linear-gradient(90deg,color-mix(in srgb,var(--paper) 10%,transparent) 0 1px,transparent 1px 8px) top/100% 5px no-repeat}
+
+/* sections */
+section{padding:clamp(80px,12vw,160px) var(--pad);position:relative}
+.sh{display:grid;grid-template-columns:1fr;gap:20px;margin-bottom:clamp(40px,6vw,80px);align-items:start}
+h2{font-family:var(--serif);font-weight:400;font-size:clamp(40px,6.4vw,96px);line-height:.92;letter-spacing:-.03em}
+h2 em{color:var(--accent)}
+.sh p{color:var(--dim);max-width:560px;margin-top:22px;font-size:14px}
+/* states */
+.states{display:grid;grid-template-columns:repeat(4,1fr);border-top:1px solid color-mix(in srgb,var(--paper) 14%,transparent)}
+.st{padding:30px 22px 26px;border-right:1px solid color-mix(in srgb,var(--paper) 14%,transparent);position:relative;overflow:hidden}
+.st:last-child{border-right:0}
+.st .g{font-size:clamp(80px,10vw,150px);font-weight:800;line-height:1;display:block;margin-bottom:20px;transition:transform .4s cubic-bezier(.2,.9,.3,1.4)}
+.st:hover .g{transform:translateY(-8px) rotate(-4deg)}
+.st h3{font-size:13px;text-transform:uppercase;letter-spacing:2px;margin-bottom:8px}
+.st p{color:var(--dim);font-size:12.5px}
+.st .src{margin-top:14px;font-size:10.5px;color:var(--dim);opacity:.75}
+.c-input{color:var(--red)}.c-done{color:var(--green)}.c-working{color:var(--yellow)}.c-idle{color:var(--muted)}
+@media (max-width:900px){.states{grid-template-columns:1fr 1fr}.st:nth-child(2){border-right:0}.st{border-bottom:1px solid color-mix(in srgb,var(--paper) 14%,transparent)}}
+.spin{font-variant-emoji:text}
+.blink{animation:blink 1.2s steps(1) infinite}@keyframes blink{50%{opacity:.25}}
+
+/* pipeline */
+.pipe{display:grid;grid-template-columns:repeat(5,1fr);gap:0;position:relative}
+.node{padding:0 18px 0 0;position:relative}
+.node .box{margin:0 0 16px;border:1px solid color-mix(in srgb,var(--paper) 25%,transparent);padding:16px 14px;font-weight:700;font-size:15px;position:relative;background:var(--ink)}
+.node .box small{display:block;font-weight:400;color:var(--dim);font-size:11px;margin-top:4px}
+.node p{color:var(--dim);font-size:12px}
+.node .wire{position:absolute;top:34px;left:calc(100% - 18px);width:18px;height:1px;background:var(--accent);z-index:0}
+.node:last-child .wire{display:none}
+.node.hot .box{border-color:var(--accent);box-shadow:0 0 0 1px var(--accent),0 0 40px -10px var(--accent)}
+.pkt{position:absolute;top:0;width:9px;height:9px;background:var(--accent);box-shadow:0 0 16px var(--accent);left:0;z-index:3;transition:left .55s cubic-bezier(.6,0,.3,1),opacity .2s;opacity:0}
+.pkt.back{background:var(--green);box-shadow:0 0 16px var(--green)}
+.pipelog{margin-top:44px;font-size:12px;color:var(--dim);border-left:1px solid var(--accent);padding-left:16px;min-height:4.8em}
+.pipelog b{color:var(--paper);font-weight:500}
+@media (max-width:900px){.pipe{grid-template-columns:1fr;gap:6px}.node .wire,.pkt{display:none}.node{padding:0}}
+
+/* layouts gallery */
+.gal{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:clamp(14px,2vw,28px);align-items:start}
+.lay{display:flex;flex-direction:column;gap:14px}
+.bez{padding:8px;border:1px solid color-mix(in srgb,var(--paper) 14%,transparent);background:#0c0c0e}
+.bez canvas{display:block;width:100%;aspect-ratio:3/4;cursor:pointer}
+.lay h3{font-size:13px;font-weight:700}
+.lay h3 span{color:var(--accent);margin-right:8px}
+.lay p{font-size:12px;color:var(--dim);margin-top:4px}
+@media (max-width:1100px){.gal{grid-template-columns:repeat(3,minmax(0,1fr))}}
+@media (max-width:640px){.gal{grid-template-columns:repeat(2,minmax(0,1fr))}}
+
+/* themes */
+.themes{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:1px;background:color-mix(in srgb,var(--paper) 14%,transparent);border:1px solid color-mix(in srgb,var(--paper) 14%,transparent)}
+.th{background:var(--ink);padding:18px 16px;cursor:pointer;border:0;color:var(--paper);font:inherit;text-align:left;transition:background .2s;position:relative}
+.th:hover{background:color-mix(in srgb,var(--paper) 5%,var(--ink))}
+.th .sw{display:flex;height:46px;margin-bottom:12px}
+.th .sw i{flex:1}
+.th .sw i:first-child{flex:3}
+.th span{font-size:12px}
+.th.on span::before{content:'› ';color:var(--accent)}
+.th.on{box-shadow:inset 0 0 0 1px var(--accent)}
+
+/* build */
+.build{display:grid;grid-template-columns:1fr 1fr;gap:clamp(30px,5vw,80px);align-items:start}
+.parts{list-style:none;border-top:1px solid color-mix(in srgb,var(--paper) 14%,transparent)}
+.parts li{display:grid;grid-template-columns:40px 1fr;padding:20px 0;border-bottom:1px solid color-mix(in srgb,var(--paper) 14%,transparent)}
+.parts .n{color:var(--accent);font-size:11px;padding-top:3px}
+.parts b{display:block;font-size:15px;margin-bottom:4px}
+.parts p{color:var(--dim);font-size:12.5px}
+.parts a{color:var(--accent);text-decoration:none;border-bottom:1px solid color-mix(in srgb,var(--accent) 40%,transparent)}
+.parts a:hover{border-color:var(--accent)}
+.parts .q{margin-top:10px}
+.parts .terms{list-style:none;display:flex;flex-wrap:wrap;gap:6px;margin-top:6px}
+.parts .terms li{display:block;padding:0;border:0}
+.parts .terms code,.parts .q code{font-size:11.5px;color:var(--paper)}
+.parts .terms code{display:inline-block;padding:3px 8px;border:1px solid color-mix(in srgb,var(--paper) 18%,transparent)}
+.term{background:#0a0a0d;border:1px solid #26262e;border-radius:8px;overflow:hidden;box-shadow:0 40px 80px -30px rgba(0,0,0,.8);color:#d8d8e0}
+.term .tb{display:flex;align-items:center;gap:7px;padding:10px 14px;border-bottom:1px solid #1d1d24;font-size:11px;color:#6b6b78}
+.term .tb i{width:9px;height:9px;border-radius:50%;background:#2a2a33}
+.term .tb span{margin-left:auto}
+.term pre{padding:18px 18px 22px;font-size:12.5px;line-height:1.85;overflow-x:auto;white-space:pre}
+.term .p{color:var(--accent);user-select:none}
+.term .c{color:#5d5d6b}
+.term .o{color:#9a9aa8}
+.cp{float:right;font-size:10px;border:1px solid #33333d;background:none;color:#8a8a99;padding:2px 7px;cursor:pointer;font-family:inherit;margin-top:3px}
+.cp:hover{color:var(--accent);border-color:var(--accent)}
+.cmds{display:grid;grid-template-columns:repeat(auto-fill,minmax(250px,1fr));gap:0;margin-top:clamp(50px,7vw,90px);border-top:1px solid color-mix(in srgb,var(--paper) 14%,transparent)}
+.cmds div{padding:16px 16px 16px 0;border-bottom:1px solid color-mix(in srgb,var(--paper) 8%,transparent);font-size:12px}
+.cmds code{color:var(--accent);display:block;margin-bottom:2px}
+.cmds span{color:var(--dim)}
+@media (max-width:900px){.build{grid-template-columns:1fr}}
+
+.compat{display:flex;flex-wrap:wrap;gap:10px 34px;font-family:var(--serif);font-size:clamp(30px,4.4vw,62px);line-height:1.1;letter-spacing:-.02em}
+.compat span{color:var(--dim);transition:color .2s}
+.compat span:hover{color:var(--paper)}
+.compat span:nth-child(3n+1){font-style:italic}
+.compat sup{font-family:var(--mono);font-size:11px;color:var(--accent);letter-spacing:1px;margin-left:4px;vertical-align:super}
+
+.prs{margin-top:40px;color:var(--dim);font-size:13px;max-width:620px}
+.prs a{color:var(--accent);text-decoration:none;border-bottom:1px solid color-mix(in srgb,var(--accent) 40%,transparent)}
+footer{padding:60px var(--pad) 40px;border-top:1px solid color-mix(in srgb,var(--paper) 14%,transparent);display:flex;flex-wrap:wrap;justify-content:space-between;gap:20px;font-size:12px;color:var(--dim)}
+footer a{text-decoration:none;border-bottom:1px solid color-mix(in srgb,var(--paper) 25%,transparent)}
+
+.rv{opacity:0;transform:translateY(30px);transition:opacity .9s,transform .9s cubic-bezier(.2,.8,.2,1)}
+.rv.in{opacity:1;transform:none}
+@media (prefers-reduced-motion:reduce){.rv{opacity:1;transform:none}body::before{animation:none}}
+</style>
+</head>
+<body>
+
+<nav>
+  <a class="mark" href="#top"><b>›</b> cyberviber</a>
+  <div class="links">
+    <a href="#states">states</a><a href="#jump">the jump</a><a href="#layouts">layouts</a><a href="#themes">themes</a><a href="#build">build one</a>
+    <a class="gh" href="https://github.com/d135-1r43/cyberviber">github ↗</a>
+  </div>
+</nav>
+
+<header class="hero" id="top">
+  <div class="copy">
+    <h1><span class="m">›_</span> Every Claude,<br><em>at a glance.</em></h1>
+    <p class="lede"><b>cyberviber</b> is a 2.4″ touch display that lists the Claude Code sessions running on your computer and shows the state of each. Tapping a session focuses its terminal: the pane, the tab and the window.</p>
+    <div class="ctas">
+      <a class="btn pri" href="#build">Build one ⟶</a>
+      <a class="btn" href="https://github.com/d135-1r43/cyberviber">github.com/d135-1r43/cyberviber</a>
+    </div>
+  </div>
+  <div class="stage" id="stage">
+    <canvas id="gl" aria-label="3D model of the cyberviber display, drag to rotate, tap the screen"></canvas>
+    <div class="fallback"><div class="bez" style="width:min(300px,70vw)"><canvas id="fb"></canvas></div></div>
+    <div class="hud tl">ESP32-2432S024R<br><b>240×320</b> · LVGL 9<br>XPT2046 touch</div>
+    <div class="ctl3d" id="layoutChips"></div>
+  </div>
+</header>
+
+<div class="rule" aria-hidden="true"></div>
+
+<section id="states">
+  <div class="sh rv"><div><h2>Four states,<br><em>sorted by urgency.</em></h2>
+    <p>Claude Code hooks report to a small daemon, which tracks whether each session is working, waiting for input, finished or idle. Sessions that need you are listed first.</p></div></div>
+  <div class="states rv">
+    <div class="st"><b class="g c-input blink">!</b><h3 class="c-input">needs you</h3><p>A permission prompt or a question. Blinks and wakes the backlight.</p><div class="src">PermissionRequest · AskUserQuestion</div></div>
+    <div class="st"><b class="g c-done">✓</b><h3 class="c-done">ready</h3><p>The turn is finished, e.g. “Done · 3 files changed”.</p><div class="src">Stop</div></div>
+    <div class="st"><b class="g c-working spin">✻</b><h3 class="c-working">working</h3><p>Thinking or running tools. The activity line shows the current step.</p><div class="src">UserPromptSubmit · PreToolUse</div></div>
+    <div class="st"><b class="g c-idle">◦</b><h3 class="c-idle">idle</h3><p>Ready, but no events for ten minutes (configurable).</p><div class="src">ready + 10 min</div></div>
+  </div>
+</section>
+
+<section id="jump">
+  <div class="sh rv"><div><h2>Tap to focus<br><em>the terminal.</em></h2>
+    <p>The tap goes back over USB. The daemon focuses the multiplexer pane first, then the tab, then the window. Works on macOS and on Linux with Hyprland.</p></div></div>
+  <div class="pipe rv" id="pipe">
+    <div class="node" data-i="0"><div class="box">claude<small>hooks + session registry</small></div><p>Every hook event is posted to localhost. Sessions that started earlier are found in <code>~/.claude/sessions</code>.</p><i class="wire"></i></div>
+    <div class="node" data-i="1"><div class="box">cyberviberd<small>go · launchd / systemd</small></div><p>Keeps the session list: state, idle timer, process check, context usage.</p><i class="wire"></i></div>
+    <div class="node" data-i="2"><div class="box">usb serial<small>json lines · 115200</small></div><p>One cable for power and data. Wi-Fi is not used.</p><i class="wire"></i></div>
+    <div class="node" data-i="3"><div class="box">esp32 + lvgl<small>stateless renderer</small></div><p>Draws what the daemon sends, reports taps, dims the backlight when idle.</p><i class="wire"></i></div>
+    <div class="node" data-i="4"><div class="box">your terminal<small>pane → tab → window</small></div><p>zellij or herdr pane, Tabby tab, kitty window, Ghostty, foot.</p></div>
+    <i class="pkt" id="pkt"></i>
+  </div>
+  <div class="pipelog rv" id="pipelog"></div>
+</section>
+
+<section id="layouts">
+  <div class="sh rv"><div><h2>Five layouts,<br><em>named after desktop tools.</em></h2>
+    <p>Rendered at 240×320. On the device, swipe or press BOOT to switch. The previews run on demo data; tapping a session shows the focus message.</p></div></div>
+  <div class="gal" id="gal"></div>
+</section>
+
+<section id="themes">
+  <div class="sh rv"><div><h2>Eleven themes<br><em>from Omarchy.</em></h2>
+    <p>State colours use each palette’s red, yellow and green; the accent is used for selection and focus. Set one with <code>cyberviber theme nord</code>. Selecting one here also changes this page.</p></div></div>
+  <div class="themes rv" id="themeGrid"></div>
+</section>
+
+<section id="compat" style="padding-top:0">
+  <div class="sh rv"><div><h2>Supported <em>terminals.</em></h2></div></div>
+  <div class="compat rv">
+    <span>Ghostty</span><span>kitty</span><span>Tabby<sup>plugin</sup></span><span>foot</span><span>zellij</span><span>herdr</span><span>alacritty</span><span>Hyprland<sup>0.57+</sup></span><span>macOS</span><span>Omarchy</span>
+  </div>
+  <p class="prs rv">Missing your terminal, multiplexer or OS? <a href="https://github.com/d135-1r43/cyberviber/pulls">Pull requests</a> are welcome. Multiplexers and terminal apps are pluggable in the daemon.</p>
+</section>
+
+<section id="build">
+  <div class="sh rv"><div><h2>Build one.</h2></div></div>
+  <div class="build">
+    <ol class="parts rv">
+      <li><span class="n">01</span><div><b>The board</b><p>An ESP32-2432S024R — the 2.4″ “Cheap Yellow Display” with a resistive XPT2046 touch panel and a CH340 USB bridge. Available on <a href="https://www.amazon.com/s?k=ESP32-2432S024R">Amazon</a> and <a href="https://www.aliexpress.com/wholesale?SearchText=ESP32-2432S024R">AliExpress</a>.</p>
+        <p class="q">Search for:</p>
+        <ul class="terms"><li><code>ESP32-2432S024R</code></li><li><code>ESP32 2.4 inch TFT touch display</code></li><li><code>Cheap Yellow Display 2.4</code></li></ul>
+        <p class="q">The trailing <code>R</code> means resistive touch, which the firmware expects. The <code>C</code> variant (capacitive) and the 2.8″ <code>ESP32-2432S028</code> are different boards.</p></div></li>
+      <li><span class="n">02</span><div><b>A case</b><p>For example the <a href="https://makerworld.com/en/models/1654522-bongo-cat-mini-monitor-animated-esp32-display#profileId-1749680">mini monitor case on MakerWorld</a>. Check that it fits the 2.4″ board.</p></div></li>
+      <li><span class="n">03</span><div><b>One USB cable</b><p>Power and data. The daemon detects the port.</p></div></li>
+      <li><span class="n">04</span><div><b>Flash &amp; calibrate</b><p>PlatformIO builds the firmware. On first boot, tap the four arrow tips. Hold a finger on the screen while plugging in to calibrate again.</p></div></li>
+    </ol>
+    <div class="term rv">
+      <div class="tb"><i></i><i></i><i></i><span>~/cyberviber — zsh</span></div>
+<pre><span class="c"># daemon + hooks + status line</span><button class="cp" data-copy="go install github.com/d135-1r43/cyberviber/cmd/cyberviber@latest &amp;&amp; ~/go/bin/cyberviber install">copy</button>
+<span class="p">❯ </span>go install github.com/d135-1r43/cyberviber/cmd/cyberviber@latest
+<span class="p">❯ </span>~/go/bin/cyberviber install
+<span class="o">  ✓ hooks       ~/.claude/settings.json</span>
+<span class="o">  ✓ statusline  cyberviber statusline</span>
+<span class="o">  ✓ daemon      dev.cyberviber.daemon</span>
+
+<span class="c"># firmware</span><button class="cp" data-copy="cyberviber release 120 &amp;&amp; pio run -d firmware -t upload &amp;&amp; cyberviber release 1">copy</button>
+<span class="p">❯ </span>cyberviber release 120
+<span class="p">❯ </span>pio run -d firmware -t upload
+<span class="p">❯ </span>cyberviber release 1
+
+<span class="c"># without hardware: browser simulator with live sessions</span>
+<span class="p">❯ </span>cyberviber sim <span class="c">→ http://127.0.0.1:7337/</span></pre>
+    </div>
+  </div>
+  <div class="cmds rv">
+    <div><code>cyberviber status</code><span>session table in your shell</span></div>
+    <div><code>cyberviber layout tiling</code><span>waybar · tiling · btop · walker · hyprlock</span></div>
+    <div><code>cyberviber theme nord</code><span>stored on the device</span></div>
+    <div><code>cyberviber brightness 60</code><span>backlight in percent</span></div>
+    <div><code>cyberviber dim 15</code><span>dim after 15 idle minutes</span></div>
+    <div><code>cyberviber usb bottom</code><span>flip it, USB port down</span></div>
+    <div><code>cyberviber screenshot out.png</code><span>the device screen as PNG</span></div>
+    <div><code>cyberviber uninstall</code><span>removes hooks, daemon and plugin</span></div>
+  </div>
+</section>
+
+<footer>
+  <span>cyberviber · MIT license</span>
+  <span><a href="https://github.com/d135-1r43/cyberviber">source</a> · <a href="https://github.com/d135-1r43/cyberviber/releases">releases</a> · <a href="https://makerworld.com/en/models/1654522-bongo-cat-mini-monitor-animated-esp32-display#profileId-1749680">case on makerworld</a></span>
+</footer>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script>
+/* ================= data ================= */
+const THEMES = {
+  'tokyo-night':{name:'Tokyo Night',bg:'#1a1b26',bg2:'#16161e',surface:'#24283b',border:'#3b4261',fg:'#c0caf5',muted:'#565f89',accent:'#7aa2f7',red:'#f7768e',yellow:'#e0af68',green:'#9ece6a'},
+  'catppuccin':{name:'Catppuccin',bg:'#1e1e2e',bg2:'#181825',surface:'#313244',border:'#45475a',fg:'#cdd6f4',muted:'#7f849c',accent:'#cba6f7',red:'#f38ba8',yellow:'#f9e2af',green:'#a6e3a1'},
+  'gruvbox':{name:'Gruvbox',bg:'#282828',bg2:'#1d2021',surface:'#3c3836',border:'#504945',fg:'#ebdbb2',muted:'#928374',accent:'#d79921',red:'#fb4934',yellow:'#fabd2f',green:'#b8bb26'},
+  'everforest':{name:'Everforest',bg:'#2d353b',bg2:'#232a2e',surface:'#343f44',border:'#475258',fg:'#d3c6aa',muted:'#859289',accent:'#a7c080',red:'#e67e80',yellow:'#dbbc7f',green:'#a7c080'},
+  'kanagawa':{name:'Kanagawa',bg:'#1f1f28',bg2:'#16161d',surface:'#2a2a37',border:'#363646',fg:'#dcd7ba',muted:'#727169',accent:'#7e9cd8',red:'#e46876',yellow:'#e6c384',green:'#98bb6c'},
+  'nord':{name:'Nord',bg:'#2e3440',bg2:'#242933',surface:'#3b4252',border:'#4c566a',fg:'#eceff4',muted:'#7b88a1',accent:'#88c0d0',red:'#bf616a',yellow:'#ebcb8b',green:'#a3be8c'},
+  'rose-pine':{name:'Rosé Pine',bg:'#191724',bg2:'#13111d',surface:'#26233a',border:'#403d52',fg:'#e0def4',muted:'#6e6a86',accent:'#c4a7e7',red:'#eb6f92',yellow:'#f6c177',green:'#9ccfd8'},
+  'matte-black':{name:'Matte Black',bg:'#121212',bg2:'#0a0a0a',surface:'#1e1e1e',border:'#333333',fg:'#bebebe',muted:'#6b6b6b',accent:'#e68e0d',red:'#d35f5f',yellow:'#ffc107',green:'#8fb573'},
+  'osaka-jade':{name:'Osaka Jade',bg:'#111c18',bg2:'#0b1411',surface:'#1b2b24',border:'#2c4237',fg:'#c1c497',muted:'#53685b',accent:'#2dd5b7',red:'#ff5345',yellow:'#e5c736',green:'#549e6a'},
+  'ristretto':{name:'Ristretto',bg:'#2c2525',bg2:'#211c1c',surface:'#403838',border:'#5b5353',fg:'#fff1f3',muted:'#948a8b',accent:'#f38d70',red:'#fd6883',yellow:'#f9cc6c',green:'#adda78'},
+  'catppuccin-latte':{name:'Latte',bg:'#eff1f5',bg2:'#e6e9ef',surface:'#ccd0da',border:'#bcc0cc',fg:'#4c4f69',muted:'#8c8fa1',accent:'#8839ef',red:'#d20f39',yellow:'#df8e1d',green:'#40a02b'},
+};
+let theme = 'tokyo-night';
+try{ const t = localStorage.getItem('cv-site-theme'); if(THEMES[t]) theme = t; }catch(e){}
+const TH = () => THEMES[theme];
+
+const ACTS = {
+  working:['Thinking…','Edit main.go','Bash: go test ./...','Fetch zellij.dev','Edit firmware/src/ui.cpp','Grep "focus"','Bash: pio run','Read spec.md','Write layouts.go','Bash: mvn verify','Edit AuthResource.java','Querying dl.fact_timecard'],
+  input:['Allow Bash: pio run -t upload?','Which Quarkus version: 3.27 LTS or 3.30?','Allow Edit ~/.config/hypr/hypr.conf?','Allow Bash: rm -rf build?','Allow WebFetch makerworld.com?','Squash or merge?'],
+  done:['Done · 3 files changed','Done · opened PR #42','Done','Done · 1 file changed','Done · tests green'],
+  idle:['No activity'],
+};
+const now0 = Date.now();
+const S = [
+  {id:1,name:'cyberviber',branch:'main',term:'Ghostty',tab:1,state:'input',act:ACTS.input[0],since:42,ctx:38},
+  {id:2,name:'explore-api',branch:'feat/oauth',term:'Ghostty',tab:2,state:'working',act:'Edit AuthResource.java',since:187,ctx:64},
+  {id:3,name:'dotfiles',branch:'main',term:'foot',mx:'zellij',ms:'cfg',state:'done',act:'Done · 3 files changed',since:305,ctx:21},
+  {id:4,name:'renovate-sweep',branch:'main',term:'kitty',tab:4,mx:'zellij',ms:'work',state:'working',act:'Bash: mvn verify',since:64,ctx:82},
+  {id:5,name:'foh-wing',branch:'rider-2026',term:'Tabby',tab:2,state:'idle',act:'No activity',since:2710,ctx:12},
+  {id:6,name:'quarkus-svc',branch:'fix/cve',term:'Ghostty',tab:6,mx:'herdr',ms:'svc',state:'working',act:'Thinking…',since:15,ctx:47},
+  {id:7,name:'homelab',branch:'main',term:'Tabby',tab:3,state:'done',act:'Done · opened PR #42',since:920,ctx:70},
+].map(s=>({...s,t0:now0-s.since*1000}));
+const ORDER = {input:0,done:1,working:2,idle:3};
+const SPIN = ['·','✢','✳','✶','✻','✽','✻','✶','✳','✢'].map(g=>g+'\uFE0E');
+const LABEL = {input:'needs you',done:'ready',working:'working',idle:'idle'};
+const sorted = () => S.slice().sort((a,b)=>ORDER[a.state]-ORDER[b.state]||b.t0-a.t0);
+const counts = L => L.reduce((c,s)=>(c[s.state]++,c),{input:0,done:0,working:0,idle:0});
+const fmt = sec => sec<60?`${sec}s`:sec<3600?`${Math.floor(sec/60)}m${String(sec%60).padStart(2,'0')}`:`${Math.floor(sec/3600)}h${String(Math.floor(sec%3600/60)).padStart(2,'0')}`;
+const ago = s => fmt(Math.max(0,Math.floor((Date.now()-s.t0)/1000)));
+const where = s => [s.term, s.mx?`${s.mx} ${s.ms}`:(s.tab?`tab ${s.tab}`:'')].filter(Boolean).join(' · ');
+const clock = () => new Date().toTimeString().slice(0,5);
+const pick = a => a[Math.floor(Math.random()*a.length)];
+
+/* a tiny world: sessions keep living */
+function evolve(){
+  const s = pick(S), r = Math.random();
+  const set = (st,act) => { if(s.state!==st) s.t0 = Date.now(); s.state = st; s.act = act; };
+  if(s.state==='working'){ if(r<.45) s.act = pick(ACTS.working); else if(r<.8) set('done',pick(ACTS.done)); else set('input',pick(ACTS.input)); }
+  else if(s.state==='input'){ if(r<.6) set('working',pick(ACTS.working)); }
+  else if(s.state==='done'){ if(r<.4) set('working','Thinking…'); else if(r<.6) set('idle','No activity'); }
+  else { if(r<.5) set('working','Thinking…'); }
+  if(s.state==='working') s.ctx = Math.min(99, s.ctx + Math.floor(Math.random()*6));
+  if(!S.some(x=>x.state==='input') && Math.random()<.5){ const w = S.find(x=>x.state==='working'); if(w){ w.state='input'; w.act=pick(ACTS.input); w.t0=Date.now(); } }
+}
+setInterval(evolve, 2200);
+
+/* ================= screen renderer (240×320 device pixels) ================= */
+const LAYOUTS = [
+  {id:'waybar',tag:'A',desc:'Dense list under a waybar: sessions show up like Hyprland workspace numbers. Most information per pixel.'},
+  {id:'tiling',tag:'B',desc:'Every session is a tiled window with gaps and 2px borders. The one that needs you blinks.'},
+  {id:'btop',tag:'C',desc:'TUI dashboard: rounded boxes, state meters and a context bar per session.'},
+  {id:'walker',tag:'D',desc:'Launcher-style picker with a prompt line. Feels like choosing which app comes forward.'},
+  {id:'hyprlock',tag:'E',desc:'Attention first: whoever needs you fills the screen. A big clock when nobody does.'},
+];
+const F = (w,s) => `${w} ${s}px "JetBrains Mono",ui-monospace,monospace`;
+
+function drawScreen(ctx, layout, frame, st){
+  const T = TH(), L = sorted(), c = counts(L), hits = st.hits = [];
+  const col = k => ({input:T.red,done:T.green,working:T.yellow,idle:T.muted})[k];
+  const glyph = s => s.state==='working' ? SPIN[frame%SPIN.length] : {input:'!',done:'✓',idle:'◦'}[s.state];
+  const on = Math.floor(Date.now()/600)%2===0;
+  const rect = (x,y,w,h,c) => { ctx.fillStyle=c; ctx.fillRect(x,y,w,h); };
+  const box = (x,y,w,h,c,lw=1) => { ctx.strokeStyle=c; ctx.lineWidth=lw; ctx.strokeRect(x+lw/2,y+lw/2,w-lw,h-lw); };
+  const txt = (s,x,y,c,font,align='left',max) => {
+    ctx.font=font; ctx.fillStyle=c; ctx.textAlign=align; ctx.textBaseline='alphabetic';
+    s = String(s);
+    if(max && ctx.measureText(s).width>max){ while(s.length>1 && ctx.measureText(s+'…').width>max) s=s.slice(0,-1); s+='…'; }
+    ctx.fillText(s,x,y); return ctx.measureText(s).width;
+  };
+  const wrap = (s,x,y,c,font,max,lines,lh) => {
+    ctx.font=font; const words=s.split(' '); let line='', n=0;
+    for(let i=0;i<words.length;i++){
+      const t=line?line+' '+words[i]:words[i];
+      if(ctx.measureText(t).width>max && line){ if(n===lines-1){ txt(line+' '+words.slice(i).join(' '),x,y+n*lh,c,font,'left',max); return; } txt(line,x,y+n*lh,c,font); n++; line=words[i]; }
+      else line=t;
+    }
+    if(line) txt(line,x,y+n*lh,c,font,'left',max);
+  };
+  rect(0,0,240,320,T.bg);
+
+  if(layout==='waybar'){
+    rect(0,0,240,20,T.bg2); rect(0,19,240,1,T.border);
+    L.forEach((s,i)=>{ const x=2+i*16; if(s.state==='input'){ rect(x,0,15,20,T.red); txt(i+1,x+7.5,14,T.bg,F(700,11),'center'); } else txt(i+1,x+7.5,14,col(s.state),F(700,11),'center'); hits.push({x,y:0,w:15,h:20,id:s.id}); });
+    txt(clock(),150,14,T.fg,F(400,11),'center'); txt(`◉ ${L.length}`,236,14,T.muted,F(400,11),'right');
+    L.slice(0,6).forEach((s,i)=>{ const y=20+i*44;
+      rect(0,y,3,44,col(s.state)); rect(0,y+43,240,1,T.surface);
+      const w = txt(s.name,11,y+18,T.fg,F(700,13),'left',150);
+      txt(' '+s.branch,11+w,y+18,T.muted,F(400,11),'left',Math.max(0,180-w));
+      txt(s.act,11,y+34,s.state==='input'?T.red:T.muted,F(400,11),'left',180);
+      if(!(s.state==='input'&&!on)) txt(glyph(s),232,y+19,col(s.state),F(800,14),'right');
+      txt(ago(s),232,y+36,T.muted,F(400,11),'right');
+      hits.push({x:0,y,w:240,h:44,id:s.id});
+    });
+    rect(0,286,240,34,T.bg2); rect(0,286,240,1,T.border);
+    rect(8,292,224,4,T.surface); let x=8; const tot=L.length||1;
+    ['input','done','working','idle'].forEach(k=>{ if(!c[k]) return; const w=224*c[k]/tot; rect(x,292,w-1,4,col(k)); x+=w; });
+    [['input','!'],['done','✓'],['working','✻\uFE0E'],['idle','◦']].forEach(([k,g],i)=>txt(`${g} ${c[k]}`,8+i*44,312,col(k),F(700,11)));
+  }
+
+  else if(layout==='tiling'){
+    rect(0,0,240,18,T.bg2); txt('cyberviber',7,13,T.accent,F(800,10)); txt(clock(),120,13,T.fg,F(400,10),'center');
+    txt(String(L.length),233,13,T.muted,F(400,10),'right'); if(c.input) txt(`${c.input}! `,233-ctx.measureText(String(L.length)).width,13,T.red,F(400,10),'right');
+    const n=L.length, cols=n<=2?1:n<=6?2:3, rows=Math.max(1,Math.ceil(n/cols)), rem=n%cols;
+    const gw=(230-(cols-1)*5)/cols, gh=(297-(rows-1)*5)/rows;
+    L.forEach((s,i)=>{
+      const r=Math.floor(i/cols), cc=i%cols, span = (i===n-1&&rem)?cols-rem+1:1;
+      const x=5+cc*(gw+5), y=23+r*(gh+5), w=gw*span+(span-1)*5, h=gh;
+      const focus = s.id===st.focus;
+      box(x,y,w,h, s.state==='input' ? (on?T.red:T.border) : focus?T.accent:T.border, 2);
+      txt(s.name,x+6,y+15,T.fg,F(700,12),'left',w-(w>84?44:12)); if(w>84) txt(ago(s),x+w-6,y+15,T.muted,F(400,10),'right');
+      const big = h>=140; txt(glyph(s),x+6,y+(big?54:44),col(s.state),F(800,big?34:24));
+      if(w>84) txt(LABEL[s.state].toUpperCase(),x+(big?38:30),y+(big?48:40),col(s.state),F(700,10));
+      if(h>84) wrap(s.act,x+6,y+(big?76:62),s.state==='input'?T.fg:T.muted,F(400,big?11:10),w-12,big?3:2,12);
+      if(w>84) txt(`${where(s)} · ${s.branch}`,x+6,y+h-7,T.muted,F(400,9),'left',w-12);
+      hits.push({x,y,w,h,id:s.id});
+    });
+  }
+
+  else if(layout==='btop'){
+    const rbox=(x,y,w,h)=>{ ctx.strokeStyle=T.border; ctx.lineWidth=1; ctx.beginPath(); ctx.roundRect(x+.5,y+.5,w-1,h-1,6); ctx.stroke(); };
+    const title=(s,x,y,c=T.fg,w=700,align='left')=>{ ctx.font=F(w,10); const tw=ctx.measureText(s).width; rect(align==='left'?x-3:x-tw-3,y-6,tw+6,12,T.bg); txt(s,x,y+4,c,F(w,10),align); };
+    rbox(4,8,232,80); title('¹status',12,8); title(clock(),228,8,T.muted,400,'right');
+    [['input','need'],['done','ready'],['working','busy'],['idle','idle']].forEach(([k,lab],i)=>{
+      const y=22+i*15, f=Math.round(c[k]/(L.length||1)*14);
+      txt(lab,12,y+8,T.muted,F(400,10));
+      for(let j=0;j<14;j++) rect(50+j*9,y+1,8,7,j<f?col(k):T.surface);
+      txt(c[k],226,y+8,col(k),F(700,10),'right');
+    });
+    rbox(4,98,232,214); title('²sessions',12,98); title(`${L.length} total`,228,98,T.muted,400,'right');
+    ['','name','ctx','time'].forEach((h,i)=>txt(h.toUpperCase(),[10,28,150,226][i],118,T.muted,F(400,9),i===3?'right':'left'));
+    L.slice(0,8).forEach((s,i)=>{ const y=124+i*22;
+      if(s.state==='input') rect(5,y,230,22,T.surface);
+      txt(glyph(s),17,y+15,col(s.state),F(800,11),'center');
+      txt(s.name,28,y+15,s.state==='idle'?T.muted:T.fg,F(400,11),'left',116);
+      const f=Math.round(s.ctx/20), cc=s.ctx>=80?T.red:s.ctx>=50?T.yellow:T.green;
+      for(let j=0;j<5;j++) rect(150+j*7,y+7,6,8,j<f?cc:(s.state==='input'?T.border:T.surface));
+      txt(ago(s),226,y+15,T.muted,F(400,10),'right');
+      hits.push({x:5,y,w:230,h:22,id:s.id});
+    });
+    title('tap → focus',12,312,T.muted,400);
+  }
+
+  else if(layout==='walker'){
+    rect(0,0,240,320,T.bg2); rect(8,8,224,304,T.bg); box(8,8,224,304,T.accent,2);
+    txt('›',20,31,T.accent,F(800,13)); const w=txt('claude',32,31,T.fg,F(400,13)); if(on) txt('▏',30+w,31,T.accent,F(400,13));
+    txt(`${L.length} running`,222,30,T.muted,F(400,11),'right'); rect(10,44,220,1,T.border);
+    L.slice(0,5).forEach((s,i)=>{ const y=48+i*48;
+      if(i===0) rect(14,y,212,48,T.surface);
+      box(20,y+9,30,30,col(s.state),2); txt(glyph(s),35,y+30,col(s.state),F(800,15),'center');
+      txt(s.name,59,y+21,i===0?T.accent:T.fg,F(700,13),'left',110);
+      txt(s.act,59,y+36,s.state==='input'?T.red:T.muted,F(400,11),'left',110);
+      txt(s.mx?`${s.mx.slice(0,2)}:${s.ms}`:s.tab?`tab ${s.tab}`:s.term,220,y+21,T.muted,F(400,10),'right',50);
+      txt(ago(s),220,y+35,T.muted,F(400,10),'right');
+      hits.push({x:14,y,w:212,h:48,id:s.id});
+    });
+    rect(10,290,220,1,T.border); txt('tap to focus terminal',20,304,T.muted,F(400,9));
+    if(L.length>5) txt(`+${L.length-5} ↓`,220,304,T.muted,F(400,9),'right');
+  }
+
+  else if(layout==='hyprlock'){
+    const top=L[0], hot=top&&(top.state==='input'||top.state==='done');
+    const date=new Date().toLocaleDateString('en-GB',{weekday:'short',day:'2-digit',month:'short'}).toLowerCase();
+    const rest = hot?L.slice(1):L, chips=rest.slice(0,hot?6:4);
+    const chipsAt = y0 => chips.forEach((s,i)=>{ const x=10+(i%2)*112.5, y=y0+Math.floor(i/2)*31; box(x,y,107.5,26,T.border);
+      txt(glyph(s),x+8,y+17,col(s.state),F(800,11)); txt(s.name,x+21,y+17,T.fg,F(400,11),'left',80); hits.push({x,y,w:107.5,h:26,id:s.id}); });
+    if(!hot){
+      txt(clock(),120,104,T.fg,F(800,64),'center'); txt(date,120,126,T.muted,F(400,12),'center');
+      box(10,146,220,34,T.border,2); txt(L.length?`${c.working} working · nothing needs you`:'no claude running',120,167,T.muted,F(400,11),'center');
+      chipsAt(190);
+    } else {
+      const sc=col(top.state);
+      txt(`${clock()} · ${date}`,120,16,T.muted,F(400,11),'center');
+      box(10,26,220,180,sc,2);
+      if(top.state!=='input'||on) txt('●',20,46,sc,F(800,10)); txt(top.state==='input'?'NEEDS YOU':'YOUR TURN',32,46,sc,F(800,10));
+      txt(`1/${top.state==='input'?c.input:c.done}`,220,46,T.muted,F(400,10),'right');
+      txt(top.name,20,76,T.fg,F(800,22),'left',200);
+      wrap(top.act,20,98,T.fg,F(400,12),200,3,16);
+      txt(`${where(top)} · ${ago(top)}`,20,152,T.muted,F(400,10),'left',200);
+      rect(20,162,200,34,sc); txt('TAP TO JUMP ⟶',120,184,T.bg,F(800,12),'center');
+      hits.push({x:10,y:26,w:220,h:180,id:top.id});
+      chipsAt(216);
+    }
+  }
+
+  if(st.flash && Date.now()-st.flash.t<450){ const h=st.hits.find(x=>x.id===st.flash.id); if(h){ ctx.globalAlpha=1-(Date.now()-st.flash.t)/450; rect(h.x,h.y,h.w,h.h,T.accent); ctx.globalAlpha=1; } }
+  if(st.toast && Date.now()-st.toast.t<1700){
+    const a=Math.min(1,(Date.now()-st.toast.t)/150, (1700-(Date.now()-st.toast.t))/300); ctx.globalAlpha=Math.max(0,a);
+    rect(14,262,212,44,T.bg); box(14,262,212,44,T.accent,2);
+    txt(`⟶ ${st.toast.where}`,24,280,T.accent,F(700,11),'left',196); txt(`focusing ${st.toast.name}`,24,296,T.muted,F(400,11),'left',196);
+    ctx.globalAlpha=1;
+  }
+}
+function tapScreen(st, x, y){
+  const h = (st.hits||[]).slice().reverse().find(h=>x>=h.x&&x<=h.x+h.w&&y>=h.y&&y<=h.y+h.h);
+  if(!h) { st.layout = (st.layout+1)%LAYOUTS.length; return null; }
+  const s = S.find(s=>s.id===h.id);
+  st.flash = {id:s.id,t:Date.now()}; st.toast = {where:where(s),name:s.name,t:Date.now()}; st.focus = s.id;
+  return s;
+}
+
+/* ================= page chrome ================= */
+const $ = id => document.getElementById(id);
+function applyTheme(){
+  const t = TH(), r = document.documentElement.style;
+  for(const k in t) if(k!=='name') r.setProperty('--'+k, t[k]);
+  const light = theme==='catppuccin-latte';
+  document.body.classList.toggle('light', light);
+  r.setProperty('--ink', light ? '#f2f0ea' : `color-mix(in srgb, ${t.bg2} 45%, #050507)`);
+  document.querySelector('meta[name=theme-color]').content = light ? '#f2f0ea' : t.bg2;
+  $('themeGrid').innerHTML = Object.entries(THEMES).map(([k,v])=>`<button class="th ${k===theme?'on':''}" data-theme="${k}"><div class="sw"><i style="background:${v.bg}"></i><i style="background:${v.accent}"></i><i style="background:${v.red}"></i><i style="background:${v.yellow}"></i><i style="background:${v.green}"></i></div><span>${v.name}</span></button>`).join('');
+  if(window.onTheme) window.onTheme();
+}
+document.addEventListener('click', e=>{
+  const b = e.target.closest('[data-theme]');
+  if(b){ theme = b.dataset.theme; try{localStorage.setItem('cv-site-theme',theme)}catch(_){}; applyTheme(); }
+  const cp = e.target.closest('.cp');
+  if(cp){ navigator.clipboard?.writeText(cp.dataset.copy.replace(/&amp;/g,'&')).then(()=>{ cp.textContent='copied'; setTimeout(()=>cp.textContent='copy',1400); }).catch(()=>{}); }
+});
+
+/* states spinner */
+let frame = 0;
+setInterval(()=>{ frame++; document.querySelectorAll('.spin').forEach(el=>el.textContent=SPIN[frame%SPIN.length]); }, 120);
+
+/* gallery */
+const gal = LAYOUTS.map((l,i)=>{
+  const el = document.createElement('div'); el.className='lay rv';
+  el.innerHTML = `<div class="bez"><canvas width="480" height="640"></canvas></div><div><h3><span>${l.tag}</span>${l.id}</h3><p>${l.desc}</p></div>`;
+  $('gal').appendChild(el);
+  const cv = el.querySelector('canvas'), st = {layout:i, hits:[]};
+  cv.addEventListener('click', e=>{ const r=cv.getBoundingClientRect(); const s=tapScreen(st,(e.clientX-r.left)/r.width*240,(e.clientY-r.top)/r.height*320); st.layout=i; });
+  return {cv, ctx:cv.getContext('2d'), st, vis:false, el};
+});
+const io = new IntersectionObserver(es=>es.forEach(e=>{ if(e.isIntersecting) e.target.classList.add('in'); }),{threshold:.12});
+document.querySelectorAll('.rv').forEach(el=>io.observe(el));
+const gio = new IntersectionObserver(es=>es.forEach(e=>{ const g=gal.find(g=>g.el===e.target); if(g) g.vis=e.isIntersecting; }));
+gal.forEach(g=>gio.observe(g.el));
+setInterval(()=>{ gal.forEach(g=>{ if(!g.vis) return; g.ctx.setTransform(2,0,0,2,0,0); drawScreen(g.ctx, LAYOUTS[g.st.layout].id, frame, g.st); }); }, 120);
+
+/* pipeline animation */
+(function(){
+  const nodes=[...document.querySelectorAll('#pipe .node')], pkt=$('pkt'), log=$('pipelog');
+  const steps=[
+    [0,'out','<b>PermissionRequest</b> — quarkus-svc wants to run <b>mvn verify</b>'],
+    [1,'out','daemon: quarkus-svc → <b class="c-input">needs you</b>, sorted to the top'],
+    [2,'out','→ {"sessions":[{"name":"quarkus-svc","state":"input",…}]}'],
+    [3,'out','display: border blinks red, backlight on'],
+    [3,'back','← {"tap":"quarkus-svc"}'],
+    [1,'back','daemon: zellij pane 3 → kitty window 2 → hyprctl focus'],
+    [4,'back','terminal focused: <b>quarkus-svc</b>'],
+  ];
+  let i=0;
+  setInterval(()=>{
+    if(innerWidth<900){ /* text-only on mobile */ }
+    const [n,dir,msg]=steps[i%steps.length];
+    nodes.forEach((x,j)=>x.classList.toggle('hot',j===n));
+    const b=nodes[n].querySelector('.box'), pr=$('pipe').getBoundingClientRect(), br=b.getBoundingClientRect();
+    pkt.style.opacity=1; pkt.classList.toggle('back',dir==='back'); pkt.style.left=(br.left-pr.left+br.width/2-4)+'px'; pkt.style.top=(br.top-pr.top-5)+'px';
+    log.innerHTML = steps.slice(Math.max(0,(i%steps.length)-2),(i%steps.length)+1).map((s,k,a)=>`<div style="opacity:${k===a.length-1?1:.45}">${s[2]}</div>`).join('');
+    i++;
+  }, 1500);
+})();
+
+applyTheme();
+
+/* ================= 3D ================= */
+(function(){
+  const stage=$('stage'), canvas=$('gl');
+  const scr = document.createElement('canvas'); scr.width=720; scr.height=960;
+  const sctx = scr.getContext('2d');
+  const hero = {layout:0, hits:[]};
+  // layout chips
+  const chips=$('layoutChips');
+  const renderChips=()=>chips.innerHTML=LAYOUTS.map((l,i)=>`<button class="chip ${i===hero.layout?'on':''}" data-l="${i}">${l.tag} · ${l.id}</button>`).join('');
+  renderChips(); chips.addEventListener('click',e=>{ const b=e.target.closest('[data-l]'); if(b){ hero.layout=+b.dataset.l; renderChips(); } });
+
+  function paintScreen(){
+    sctx.setTransform(3,0,0,3,0,0); drawScreen(sctx, LAYOUTS[hero.layout].id, frame, hero);
+    // faint glare
+    const g=sctx.createLinearGradient(0,0,240,320); g.addColorStop(0,'rgba(255,255,255,.07)'); g.addColorStop(.35,'rgba(255,255,255,0)'); g.addColorStop(1,'rgba(255,255,255,.02)');
+    sctx.fillStyle=g; sctx.fillRect(0,0,240,320);
+  }
+
+  if(!window.THREE){ return fallback(); }
+  let renderer;
+  try{ renderer = new THREE.WebGLRenderer({canvas, antialias:true, alpha:true}); }catch(e){ return fallback(); }
+  function fallback(){
+    stage.classList.add('no-gl'); const fb=$('fb'); fb.width=480; fb.height=640; const fctx=fb.getContext('2d');
+    fb.addEventListener('click',e=>{ const r=fb.getBoundingClientRect(); const s=tapScreen(hero,(e.clientX-r.left)/r.width*240,(e.clientY-r.top)/r.height*320); renderChips(); });
+    setInterval(()=>{ fctx.setTransform(2,0,0,2,0,0); drawScreen(fctx, LAYOUTS[hero.layout].id, frame, hero); },120);
+  }
+  renderer.setPixelRatio(Math.min(devicePixelRatio,2));
+  renderer.outputEncoding = THREE.sRGBEncoding;
+  renderer.toneMapping = THREE.ACESFilmicToneMapping; renderer.toneMappingExposure = 1.05;
+
+  const scene = new THREE.Scene();
+  const camera = new THREE.PerspectiveCamera(30, 1, .1, 100);
+  camera.position.set(0, 1.6, 25); camera.lookAt(0,-.25,0);
+
+  // lights
+  scene.add(new THREE.HemisphereLight(0xffffff, 0x222233, .55));
+  const key = new THREE.DirectionalLight(0xffffff, 1.6); key.position.set(5,8,9); scene.add(key);
+  const rim = new THREE.DirectionalLight(0x7aa2f7, 2.2); rim.position.set(-8,4,-6); scene.add(rim);
+  const rim2 = new THREE.DirectionalLight(0xf7768e, 1.0); rim2.position.set(8,-1,-5); scene.add(rim2);
+  const glow = new THREE.PointLight(0x7aa2f7, 1.4, 7, 2); glow.position.set(0,.4,2.4); scene.add(glow);
+
+  const dev = new THREE.Group(); scene.add(dev);
+  const body = new THREE.Group(); dev.add(body);
+
+  const rounded = (w,h,r) => { const s=new THREE.Shape(), x=-w/2, y=-h/2;
+    s.moveTo(x+r,y); s.lineTo(x+w-r,y); s.quadraticCurveTo(x+w,y,x+w,y+r); s.lineTo(x+w,y+h-r); s.quadraticCurveTo(x+w,y+h,x+w-r,y+h);
+    s.lineTo(x+r,y+h); s.quadraticCurveTo(x,y+h,x,y+h-r); s.lineTo(x,y+r); s.quadraticCurveTo(x,y,x+r,y); return s; };
+  const plastic = new THREE.MeshStandardMaterial({color:0xe9e5dc, roughness:.62, metalness:0});
+  const dark = new THREE.MeshStandardMaterial({color:0x0d0d10, roughness:.35, metalness:.1});
+  const accentMat = new THREE.MeshStandardMaterial({color:0x7aa2f7, roughness:.5, emissive:0x7aa2f7, emissiveIntensity:.25});
+
+  // shell: rounded monitor, 60×76×24mm  (1 unit = 10mm)
+  const W=6.0, H=7.6, D=2.4;
+  const shellShape = rounded(W,H,.9);
+  const hole = rounded(4.25,5.45,.25);
+  const frontShape = rounded(W,H,.9); const hp=new THREE.Path(hole.getPoints(8).map(p=>new THREE.Vector2(p.x,p.y+.45))); frontShape.holes.push(hp);
+  const shell = new THREE.Mesh(new THREE.ExtrudeGeometry(shellShape,{depth:D-.4,bevelEnabled:true,bevelThickness:.2,bevelSize:.2,bevelSegments:6,curveSegments:24}), plastic);
+  shell.position.z = -D/2; body.add(shell);
+  // front lip with screen window (slightly proud)
+  const lip = new THREE.Mesh(new THREE.ExtrudeGeometry(frontShape,{depth:.12,bevelEnabled:true,bevelThickness:.06,bevelSize:.06,bevelSegments:4,curveSegments:24}), plastic);
+  lip.position.z = D/2 - .02; body.add(lip);
+  // black inner bezel + screen
+  const bez = new THREE.Mesh(new THREE.PlaneGeometry(4.2,5.4), dark); bez.position.set(0,.45,D/2+.03); body.add(bez);
+  const tex = new THREE.CanvasTexture(scr); tex.encoding = THREE.sRGBEncoding; tex.anisotropy = 8;
+  const screen = new THREE.Mesh(new THREE.PlaneGeometry(3.7,4.93), new THREE.MeshBasicMaterial({map:tex, toneMapped:false}));
+  screen.position.set(0,.45,D/2+.04); body.add(screen);
+
+  // foot
+  const foot = new THREE.Mesh(new THREE.ExtrudeGeometry(rounded(4.6,2.6,.5),{depth:.22,bevelEnabled:true,bevelThickness:.06,bevelSize:.06,bevelSegments:3,curveSegments:16}), plastic);
+  foot.rotation.x=-Math.PI/2; foot.position.set(0,-H/2-.02,-.2); dev.add(foot);
+  // usb-c cable from the back
+  const curve = new THREE.CatmullRomCurve3([new THREE.Vector3(0,-1.4,-D/2-.1),new THREE.Vector3(0,-2.2,-2.4),new THREE.Vector3(.6,-4.1,-3.6),new THREE.Vector3(2.4,-4.2,-6),new THREE.Vector3(6,-4.2,-9)]);
+  const cable = new THREE.Mesh(new THREE.TubeGeometry(curve,80,.12,10,false), new THREE.MeshStandardMaterial({color:0x17171c,roughness:.5}));
+  dev.add(cable);
+  // back label
+  const lab = document.createElement('canvas'); lab.width=512; lab.height=256; const lx=lab.getContext('2d');
+  const drawLab=()=>{ lx.clearRect(0,0,512,256); lx.fillStyle='#a19c92'; lx.font='800 44px "JetBrains Mono",monospace'; lx.textAlign='center'; lx.fillText('› cyberviber',256,110);
+    lx.font='400 22px "JetBrains Mono",monospace'; lx.fillText('ESP32 · 240×320 · USB-C',256,160); };
+  drawLab(); const labTex=new THREE.CanvasTexture(lab);
+  const labM = new THREE.Mesh(new THREE.PlaneGeometry(3,1.5), new THREE.MeshBasicMaterial({map:labTex,transparent:true,opacity:.85}));
+  labM.position.set(.4,1.4,-D/2-.21); labM.rotation.y=Math.PI; body.add(labM);
+  const plug = new THREE.Mesh(new THREE.BoxGeometry(.5,.24,.6), new THREE.MeshStandardMaterial({color:0xb8b8c0,metalness:.8,roughness:.3})); plug.position.set(0,-1.4,-D/2-.25); dev.add(plug);
+
+  // tilt the monitor back a touch; it sits on the desk
+  body.rotation.x = -.1; body.position.y = .45;
+  // floor shadow + screen spill
+  const sh = document.createElement('canvas'); sh.width=sh.height=256; const shx=sh.getContext('2d');
+  const rg=shx.createRadialGradient(128,128,0,128,128,128); rg.addColorStop(0,'rgba(0,0,0,.75)'); rg.addColorStop(1,'rgba(0,0,0,0)'); shx.fillStyle=rg; shx.fillRect(0,0,256,256);
+  const shadow = new THREE.Mesh(new THREE.PlaneGeometry(10,6), new THREE.MeshBasicMaterial({map:new THREE.CanvasTexture(sh),transparent:true,depthWrite:false}));
+  shadow.rotation.x=-Math.PI/2; shadow.position.y=-H/2+.05; dev.add(shadow);
+  const spillC = document.createElement('canvas'); spillC.width=spillC.height=256; const spx=spillC.getContext('2d');
+  const sg=spx.createRadialGradient(128,128,0,128,128,128); sg.addColorStop(0,'rgba(255,255,255,.55)'); sg.addColorStop(1,'rgba(255,255,255,0)'); spx.fillStyle=sg; spx.fillRect(0,0,256,256);
+  const spill = new THREE.Mesh(new THREE.PlaneGeometry(9,5), new THREE.MeshBasicMaterial({map:new THREE.CanvasTexture(spillC),transparent:true,depthWrite:false,blending:THREE.AdditiveBlending,opacity:.25,color:0x7aa2f7}));
+  spill.rotation.x=-Math.PI/2; spill.position.set(0,-H/2+.07,2.6); dev.add(spill);
+  // ring of tick marks on the floor — a quiet instrument dial
+  const ring = new THREE.Group(); const tm = new THREE.MeshBasicMaterial({color:0x7aa2f7,transparent:true,opacity:.35});
+  for(let i=0;i<120;i++){ const a=i/120*Math.PI*2, long=i%10===0; const m=new THREE.Mesh(new THREE.PlaneGeometry(.025,long?.5:.22),tm);
+    m.rotation.x=-Math.PI/2; m.rotation.z=-a; m.position.set(Math.sin(a)*6.2,-H/2+.02,Math.cos(a)*6.2); ring.add(m); }
+  dev.add(ring);
+
+  window.onTheme = () => { const t=TH(); rim.color.set(t.accent); rim2.color.set(t.red); glow.color.set(t.accent); accentMat.color.set(t.accent); accentMat.emissive.set(t.accent); spill.material.color.set(t.accent); tm.color.set(t.accent); };
+  window.onTheme();
+
+  function resize(){ const r=stage.getBoundingClientRect(); renderer.setSize(r.width,r.height,false); camera.aspect=r.width/r.height;
+    camera.position.z = camera.aspect<.8 ? 31 : 25; camera.lookAt(0,-.25,0); camera.updateProjectionMatrix(); }
+  addEventListener('resize',resize); resize();
+
+  // interaction: drag to orbit with inertia, tap screen
+  let yaw=-.45, pitch=.08, vy=0, vp=0, drag=null, moved=0, lastT=performance.now(), idle=0;
+  const ray=new THREE.Raycaster(), v2=new THREE.Vector2();
+  canvas.addEventListener('pointerdown',e=>{ drag={x:e.clientX,y:e.clientY}; moved=0; canvas.setPointerCapture(e.pointerId); });
+  canvas.addEventListener('pointermove',e=>{ if(!drag) return; const dx=e.clientX-drag.x, dy=e.clientY-drag.y; moved+=Math.abs(dx)+Math.abs(dy);
+    vy=dx*.006; vp=dy*.004; yaw+=vy; pitch=Math.max(-.35,Math.min(.6,pitch+vp)); drag={x:e.clientX,y:e.clientY}; idle=0; });
+  canvas.addEventListener('pointerup',e=>{
+    if(drag && moved<6){ const r=canvas.getBoundingClientRect(); v2.set((e.clientX-r.left)/r.width*2-1, -(e.clientY-r.top)/r.height*2+1);
+      ray.setFromCamera(v2,camera); const hit=ray.intersectObject(screen)[0];
+      if(hit){ const s=tapScreen(hero, hit.uv.x*240, (1-hit.uv.y)*320); renderChips(); if(s) bonk=performance.now(); } }
+    drag=null; });
+  let bonk=0, mx=0, my=0;
+  addEventListener('pointermove',e=>{ mx=e.clientX/innerWidth-.5; my=e.clientY/innerHeight-.5; });
+
+  let lastPaint=0, visible=true;
+  new IntersectionObserver(es=>visible=es[0].isIntersecting).observe(stage);
+  function loop(t){
+    requestAnimationFrame(loop);
+    if(!visible) return;
+    const dt=Math.min(.05,(t-lastT)/1000); lastT=t; idle+=dt;
+    if(!drag){ yaw+=vy; vy*=.94; pitch+=vp; vp*=.9; pitch=Math.max(-.35,Math.min(.6,pitch));
+      if(idle>2.5){ yaw += (Math.sin(t*.00025)*.55-.2 - yaw)*.008; pitch += (.08 - pitch)*.01; } }
+    dev.rotation.y = yaw + mx*.12; dev.rotation.x = pitch + my*.06;
+    dev.position.y = Math.sin(t*.0012)*.06;
+    ring.rotation.y = t*.00005;
+    // a small press on tap
+    const since=(t-bonk)/1000; body.rotation.x = -.1 - (since<.3 ? Math.sin(since/.3*Math.PI)*.04 : 0);
+    if(t-lastPaint>110){ paintScreen(); tex.needsUpdate=true; lastPaint=t; }
+    glow.intensity = 1.2 + (S.some(s=>s.state==='input') ? (Math.floor(Date.now()/600)%2?0:.8) : 0);
+    renderer.render(scene,camera);
+  }
+  document.fonts?.ready.then(()=>{ drawLab(); labTex.needsUpdate=true; });
+  requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>
