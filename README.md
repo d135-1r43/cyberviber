@@ -2,6 +2,8 @@
 
 Claude Code session manager for a 2.4" ESP32 touch display (ESP32-2432S024, 240×320). It lists all running Claude Code sessions, shows their state (needs you / ready / working / idle), and tapping one brings its terminal to the front: zellij or herdr pane, then the Tabby tab, Ghostty or kitty window.
 
+Website: https://d135-1r43.github.io/cyberviber/ (source in [site/](site/index.html))
+
 Status: the Mac daemon, the browser simulator, the jump to the terminal, the USB link and the firmware with all five layouts and eleven themes work, and the backlight dims when nothing happens. Design and architecture are in [spec.md](spec.md); the layouts are in [design/index.html](design/index.html).
 
 ## Install (macOS)
