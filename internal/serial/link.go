@@ -315,12 +315,23 @@ func (l *Link) probe(ctx context.Context, path string) (*conn, hello, error) {
 			}
 		case line := <-c.lines:
 			var h hello
-			if json.Unmarshal(line, &h) == nil && h.Type == "hello" && h.Device == "cyberviber" {
+			if json.Unmarshal(line, &h) != nil || h.Type != "hello" {
+				continue
+			}
+			if foreign(h) {
+				c.close()
+				return nil, hello{}, fmt.Errorf("board runs %s", h.Device)
+			}
+			if h.Device == "cyberviber" {
 				return c, h, nil
 			}
 		}
 	}
 }
+
+// foreign reports a hello from another app on the same board (e.g. one started by a launcher);
+// its own host program needs the port then.
+func foreign(h hello) bool { return h.Device != "" && h.Device != "cyberviber" }
 
 // serve pushes session lists and handles device messages. It returns a positive duration
 // when the port was released, otherwise the error that ended the connection.
@@ -373,6 +384,9 @@ func (l *Link) serve(ctx context.Context, c *conn) (time.Duration, error) {
 			case "hello": // device rebooted
 				var h hello
 				if json.Unmarshal(line, &h) == nil {
+					if foreign(h) {
+						return 0, fmt.Errorf("board runs %s now", h.Device)
+					}
 					st := l.Status()
 					st.Firmware, st.Layout, st.Theme, st.Brightness, st.DimAfter, st.USB = h.FW, h.Layout, h.Theme, h.Bright, h.Dim, h.USB
 					l.setStatus(st)

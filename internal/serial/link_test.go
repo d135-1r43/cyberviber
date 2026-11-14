@@ -299,3 +299,48 @@ func TestShouldSendConfigOnlyWhenConnected(t *testing.T) {
 		t.Fatalf("config = %v", m)
 	}
 }
+
+func TestShouldReleaseThePortWhenAnotherAppBoots(t *testing.T) {
+	// given cyberviber is connected
+	port, dev := newFake()
+	l, cancel := startLink(t, map[string]*fakePort{"/dev/cu.device": port})
+	defer cancel()
+	dev.next(t, "hello")
+	dev.send(t, `{"type":"hello","device":"cyberviber","fw":"0.4.2"}`)
+	dev.next(t, "sessions")
+
+	// when the launcher restarts the board into another app, which says hello as itself
+	dev.send(t, `{"type":"hello","device":"pcstats","fw":"0.1.0"}`)
+
+	// then the daemon lets go of the port, so that app's host program can open it
+	select {
+	case <-port.closed:
+	case <-time.After(3 * time.Second):
+		t.Fatal("port kept open for another app")
+	}
+	if l.Status().Connected {
+		t.Fatal("must not count as connected")
+	}
+}
+
+func TestShouldGiveUpProbingAtOnceWhenAnotherAppAnswers(t *testing.T) {
+	// given another app runs on the board
+	port, dev := newFake()
+	_, cancel := startLink(t, map[string]*fakePort{"/dev/cu.device": port})
+	defer cancel()
+	dev.next(t, "hello")
+	start := time.Now()
+
+	// when
+	dev.send(t, `{"type":"hello","device":"pcstats","fw":"0.1.0"}`)
+
+	// then
+	select {
+	case <-port.closed:
+		if d := time.Since(start); d >= helloTimeout {
+			t.Fatalf("took %v", d)
+		}
+	case <-time.After(helloTimeout):
+		t.Fatal("port held until the hello timeout")
+	}
+}

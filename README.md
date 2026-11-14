@@ -92,6 +92,8 @@ go install ./cmd/cyberviber && ~/go/bin/cyberviber install   # hooks, daemon, Ta
 
 On the old Mac, run `~/go/bin/cyberviber uninstall` if it should stop reporting.
 
+With [cyd-launcher](https://github.com/MiggiV2/cyd-launcher) the board can run other apps too. When one of them says hello as itself, the daemon lets go of the serial port so that app's host program (e.g. [cyd-pcstats](https://github.com/MiggiV2/cyd-pcstats)) can open it, and picks it up again once cyberviber is back.
+
 On the device: swipe left/right or press BOOT to cycle layouts, long-press the top bar (or the header of the layout) for the settings screen. Layout, theme, brightness, the dim timeout and the orientation (USB port at the top or bottom, always portrait) are kept on the device. After the dim timeout (default 10 min) without a touch the backlight dims; a touch wakes it (that touch does nothing else), and so does a session that newly needs you.
 
 Open questions are in spec §7.
