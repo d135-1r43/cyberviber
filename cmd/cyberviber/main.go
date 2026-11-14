@@ -54,10 +54,10 @@ usage:
   cyberviber usb [top|bottom]       show or set where the USB port points (turns the screen by 180°)
   cyberviber screenshot [file.png]  save the device screen (takes ~20 s)
   cyberviber release [s]  free the device's serial port for s seconds (default 60), e.g. to flash it
-  cyberviber install      add hooks to ~/.claude/settings.json and start the launchd agent
+  cyberviber install      add hooks to ~/.claude/settings.json (and ~/.vibe/hooks.toml) and start the launchd agent
   cyberviber uninstall    remove hooks and the launchd agent
   cyberviber version      print the version
-  cyberviber hook         (called by Claude Code) forward a hook event to the daemon
+  cyberviber hook         (called by Claude Code or Mistral Vibe) forward a hook event to the daemon
   cyberviber statusline   (called by Claude Code) report context usage to the daemon
 `
 
@@ -546,6 +546,14 @@ func runInstall(args []string) error {
 		fmt.Println("status line: reports context usage (ctx) to the daemon, prints nothing")
 	}
 
+	if install.VibeInstalled() {
+		path := filepath.Join(install.VibeDir(), "hooks.toml")
+		if err := rewriteSettings(path, func(b []byte) ([]byte, error) { return install.MergeVibeHooks(b, bin), nil }); err != nil {
+			return err
+		}
+		fmt.Println("mistral vibe hooks added to", path)
+	}
+
 	if install.TabbyInstalled() {
 		dir, err := install.InstallTabbyPlugin(install.TabbyPluginsDir())
 		if err != nil {
@@ -574,6 +582,13 @@ func runUninstall(args []string) error {
 		return err
 	}
 	fmt.Println("hooks removed from", p.settings)
+	vibeHooks := filepath.Join(install.VibeDir(), "hooks.toml")
+	if b, err := os.ReadFile(vibeHooks); err == nil && !bytes.Equal(install.RemoveVibeHooks(b), b) {
+		if err := rewriteSettings(vibeHooks, func(b []byte) ([]byte, error) { return install.RemoveVibeHooks(b), nil }); err != nil {
+			return err
+		}
+		fmt.Println("mistral vibe hooks removed from", vibeHooks)
+	}
 	if err := install.RemoveTabbyPlugin(install.TabbyPluginsDir()); err != nil {
 		return err
 	}

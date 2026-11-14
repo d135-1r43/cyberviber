@@ -146,3 +146,21 @@ func TestShouldListAncestors(t *testing.T) {
 		t.Fatalf("%+v", chain)
 	}
 }
+
+func TestShouldFindVibeAboveItsAppServer(t *testing.T) {
+	// given hook(100) <- sh(90) <- python app-server(85) <- vibe-rs(80) <- zsh(70)
+	get := fakeTable(
+		Proc{PID: 90, PPID: 85, Comm: "sh", Name: "sh"},
+		Proc{PID: 85, PPID: 80, Comm: "python", Name: "python"},
+		Proc{PID: 80, PPID: 70, Comm: "vibe-rs", Name: "vibe-rs", TTY: "pts/4"},
+		Proc{PID: 70, PPID: 1, Comm: "zsh", Name: "zsh"},
+	)
+
+	// when
+	p, ok := findAgent(90, get)
+
+	// then
+	if !ok || p.PID != 80 || p.TTY != "pts/4" {
+		t.Fatalf("got %+v ok=%v", p, ok)
+	}
+}

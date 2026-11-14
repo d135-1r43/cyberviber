@@ -22,6 +22,11 @@ func (p Proc) IsClaude() bool {
 		strings.Contains(p.Exe, "/claude/versions/")
 }
 
+// IsVibe reports whether the process is the Mistral Vibe CLI (its Rust TUI; `vibe` execs into it).
+func (p Proc) IsVibe() bool {
+	return strings.EqualFold(p.Name, "vibe-rs") || strings.EqualFold(p.Comm, "vibe-rs")
+}
+
 // Chain returns pid and its ancestors up to (excluding) PID 1.
 func Chain(pid int) []Proc { return chain(pid, Get) }
 
@@ -44,7 +49,7 @@ func Alive(pid int) bool {
 	return err == nil || errors.Is(err, syscall.EPERM)
 }
 
-// FindAgent walks up from pid (usually the hook's parent) to the Claude Code process.
+// FindAgent walks up from pid (usually the hook's parent) to the Claude Code or Vibe process.
 func FindAgent(pid int) (Proc, bool) { return findAgent(pid, Get) }
 
 var shells = map[string]bool{"sh": true, "bash": true, "zsh": true, "dash": true, "fish": true, "nu": true}
@@ -56,7 +61,7 @@ func findAgent(pid int, get func(int) (Proc, error)) (Proc, bool) {
 		if err != nil {
 			break
 		}
-		if p.IsClaude() {
+		if p.IsClaude() || p.IsVibe() {
 			return p, true
 		}
 		name := p.Name

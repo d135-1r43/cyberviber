@@ -32,6 +32,14 @@ herdr and zellij need no setup: the daemon reads the pane from the session's env
 
 `cyberviber uninstall` removes all of it, except the kitty lines, which you added yourself.
 
+### Mistral Vibe
+
+If `~/.vibe` (or `$VIBE_HOME`) exists, `cyberviber install` also appends three hooks (`pre_tool`, `post_tool`, `post_agent`) to `~/.vibe/hooks.toml`, in a block between `# >>> cyberviber` and `# <<< cyberviber`; your own hooks stay as they are. [Mistral Vibe](https://github.com/mistralai/mistral-vibe) sessions then show up next to the Claude Code ones and jump to their pane the same way. Vibe has fewer hooks than Claude Code, so:
+
+- a session appears with its first tool call or finished turn, not at start, and disappears when the `vibe` process exits.
+- a question (`ask_user_question`) shows as "needs you"; a permission prompt does not (Vibe has no hook for it), the session stays "working".
+- there is no context usage (`ctx`).
+
 ## Install (Linux, Hyprland)
 
 Tested on Omarchy (Arch, Hyprland, foot, zellij); kitty and herdr are unit-tested. Needs `ss` (iproute2) and `hyprctl`.

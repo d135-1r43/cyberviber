@@ -8,6 +8,7 @@ import (
 	"io"
 	"math"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/d135-1r43/cyberviber/internal/event"
@@ -17,7 +18,8 @@ import (
 
 type payload struct {
 	event.Event
-	ToolInput json.RawMessage `json:"tool_input"`
+	ToolInput       json.RawMessage `json:"tool_input"`
+	ParentSessionID string          `json:"parent_session_id"`
 }
 
 // Build parses the hook payload from r and adds activity text and process information.
@@ -25,6 +27,9 @@ func Build(r io.Reader, getenv func(string) string, agent func() (proc.Proc, boo
 	var p payload
 	if err := json.NewDecoder(io.LimitReader(r, 16<<20)).Decode(&p); err != nil {
 		return event.Event{}, fmt.Errorf("parse hook payload: %w", err)
+	}
+	if err := fromVibe(&p); err != nil {
+		return event.Event{}, err
 	}
 	e := p.Event
 	e.Time = now
@@ -40,6 +45,34 @@ func Build(r io.Reader, getenv func(string) string, agent func() (proc.Proc, boo
 	}
 	e.Mux, _ = mux.Detect(getenv)
 	return e, nil
+}
+
+// fromVibe rewrites a Mistral Vibe hook payload into the Claude Code events the daemon knows.
+// A subagent's events belong to its parent session; its finished turn is not the parent's.
+func fromVibe(p *payload) error {
+	switch p.Name {
+	case event.VibePreTool:
+		p.Name = event.PreToolUse
+	case event.VibePostTool:
+		p.Name = event.PostToolUse
+	case event.VibePostAgent:
+		p.Name = event.Stop
+		if p.ParentSessionID != "" {
+			p.Name = event.PostToolUse
+		}
+	default:
+		if p.Name != "" && strings.ToLower(p.Name) == p.Name {
+			return fmt.Errorf("unsupported vibe hook event %q", p.Name)
+		}
+		return nil
+	}
+	if p.ParentSessionID != "" {
+		p.SessionID = p.ParentSessionID
+	}
+	if p.ToolName != "" {
+		p.ToolName = event.VibeTool(p.ToolName)
+	}
+	return nil
 }
 
 // Send posts the event to the daemon. It never blocks for long: hooks must not slow Claude Code down.

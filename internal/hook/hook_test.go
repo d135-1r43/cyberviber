@@ -68,3 +68,71 @@ func TestShouldReadContextUsageFromStatusLineInput(t *testing.T) {
 		}
 	}
 }
+
+func noAgent() (proc.Proc, bool) { return proc.Proc{}, false }
+
+func noEnv(string) string { return "" }
+
+func TestShouldTranslateVibePreTool(t *testing.T) {
+	// given
+	in := `{"hook_event_name":"pre_tool","session_id":"v1","parent_session_id":null,"cwd":"/x",
+	        "transcript_path":"/t","tool_name":"file_system.edit","tool_call_id":"call_1",
+	        "tool_input":{"file_path":"/x/main.go","old_string":"a","new_string":"b"}}`
+	env := map[string]string{"HERDR_SOCKET_PATH": "/h/herdr/herdr.sock", "HERDR_PANE_ID": "p3"}
+	agent := func() (proc.Proc, bool) { return proc.Proc{PID: 80, TTY: "pts/4"}, true }
+
+	// when
+	e, err := Build(strings.NewReader(in), func(k string) string { return env[k] }, agent, time.Now())
+
+	// then
+	if err != nil {
+		t.Fatal(err)
+	}
+	if e.Name != event.PreToolUse || e.SessionID != "v1" || e.Cwd != "/x" || e.ToolName != "Edit" ||
+		e.Activity != "Edit main.go" || e.File != "/x/main.go" || e.PID != 80 || e.Mux.Kind != "herdr" {
+		t.Fatalf("unexpected %+v", e)
+	}
+}
+
+func TestShouldTranslateVibeQuestionToAskUserQuestion(t *testing.T) {
+	in := `{"hook_event_name":"pre_tool","session_id":"v1","tool_name":"ui.ask_user_question",
+	        "tool_input":{"questions":[{"question":"Which port?"}]}}`
+	e, err := Build(strings.NewReader(in), noEnv, noAgent, time.Now())
+	if err != nil || e.Name != event.PreToolUse || e.ToolName != "AskUserQuestion" || e.Activity != "Which port?" {
+		t.Fatalf("err=%v %+v", err, e)
+	}
+}
+
+func TestShouldTranslateVibePostToolAndPostAgent(t *testing.T) {
+	cases := map[string]string{
+		`{"hook_event_name":"post_tool","session_id":"v1","tool_name":"file_system.bash","tool_status":"success"}`: event.PostToolUse,
+		`{"hook_event_name":"post_agent","session_id":"v1","parent_session_id":null,"agent_name":"default"}`:       event.Stop,
+	}
+	for in, want := range cases {
+		e, err := Build(strings.NewReader(in), noEnv, noAgent, time.Now())
+		if err != nil || e.Name != want || e.SessionID != "v1" {
+			t.Errorf("%s: err=%v %+v", in, err, e)
+		}
+	}
+}
+
+func TestShouldAttributeVibeSubagentEventsToTheParentSession(t *testing.T) {
+	// a subagent's turn ending is not the end of the parent's turn
+	cases := map[string]string{
+		`{"hook_event_name":"pre_tool","session_id":"sub","parent_session_id":"v1","tool_name":"file_system.read_file","tool_input":{"path":"/x/a.go"}}`: event.PreToolUse,
+		`{"hook_event_name":"post_agent","session_id":"sub","parent_session_id":"v1","agent_name":"reviewer"}`:                                           event.PostToolUse,
+	}
+	for in, want := range cases {
+		e, err := Build(strings.NewReader(in), noEnv, noAgent, time.Now())
+		if err != nil || e.Name != want || e.SessionID != "v1" {
+			t.Errorf("%s: err=%v %+v", in, err, e)
+		}
+	}
+}
+
+func TestShouldIgnoreUnknownVibeEvents(t *testing.T) {
+	in := `{"hook_event_name":"pre_agent","session_id":"v1"}`
+	if _, err := Build(strings.NewReader(in), noEnv, noAgent, time.Now()); err == nil {
+		t.Fatal("expected error for an unknown lower-case event")
+	}
+}

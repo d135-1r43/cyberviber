@@ -15,6 +15,7 @@ type toolInput struct {
 	Description  string `json:"description"`
 	FilePath     string `json:"file_path"`
 	NotebookPath string `json:"notebook_path"`
+	Path         string `json:"path"`
 	Pattern      string `json:"pattern"`
 	URL          string `json:"url"`
 	Query        string `json:"query"`
@@ -29,6 +30,9 @@ func Summarize(tool string, raw json.RawMessage) (activity, editedFile string) {
 	var in toolInput
 	if len(raw) > 0 && json.Unmarshal(raw, &in) != nil {
 		return truncate(tool), ""
+	}
+	if in.FilePath == "" {
+		in.FilePath = in.Path
 	}
 	switch tool {
 	case "Bash":
@@ -60,6 +64,9 @@ func Summarize(tool string, raw json.RawMessage) (activity, editedFile string) {
 	case "WebSearch":
 		return truncate("Search " + in.Query), ""
 	case "Agent", "Task":
+		if in.Description == "" {
+			return "Agent", ""
+		}
 		return truncate("Agent: " + in.Description), ""
 	case "AskUserQuestion":
 		if len(in.Questions) > 0 && in.Questions[0].Question != "" {
