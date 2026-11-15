@@ -36,6 +36,7 @@ import (
 	"github.com/d135-1r43/cyberviber/internal/serial"
 	"github.com/d135-1r43/cyberviber/internal/server"
 	"github.com/d135-1r43/cyberviber/internal/session"
+	bugst "go.bug.st/serial"
 )
 
 // version is set at build time (-ldflags "-X main.version=…").
@@ -54,6 +55,7 @@ usage:
   cyberviber usb [top|bottom]       show or set where the USB port points (turns the screen by 180°)
   cyberviber screenshot [file.png]  save the device screen (takes ~20 s)
   cyberviber release [s]  free the device's serial port for s seconds (default 60), e.g. to flash it
+  cyberviber launcher [port]        reset the board into the cyd-launcher menu (instead of its RST button)
   cyberviber install      add hooks to ~/.claude/settings.json (and ~/.vibe/hooks.toml) and start the launchd agent
   cyberviber uninstall    remove hooks and the launchd agent
   cyberviber version      print the version
@@ -89,6 +91,8 @@ func main() {
 		err = openURL(fmt.Sprintf("http://127.0.0.1:%d/", cfg.Port))
 	case "release":
 		err = runRelease(cfg, os.Args[2:])
+	case "launcher":
+		err = runLauncher(cfg, os.Args[2:])
 	case "layout":
 		err = runConfig(cfg, "layout", protocol.Layouts, os.Args[2:])
 	case "theme":
@@ -250,16 +254,29 @@ func runRelease(cfg config.Config, args []string) error {
 		}
 		sec = n
 	}
+	running, err := releasePort(cfg, sec)
+	if err != nil {
+		return err
+	}
+	if !running {
+		fmt.Println("daemon not running, port is free")
+		return nil
+	}
+	fmt.Printf("serial port released for %ds\n", sec)
+	return nil
+}
+
+// releasePort asks the daemon to close the serial port for sec seconds and waits until it did.
+func releasePort(cfg config.Config, sec int) (daemonRunning bool, err error) {
 	c := http.Client{Timeout: 2 * time.Second}
 	body := strings.NewReader(fmt.Sprintf(`{"seconds":%d}`, sec))
 	resp, err := c.Post(fmt.Sprintf("http://127.0.0.1:%d/release", cfg.Port), "application/json", body)
 	if err != nil {
-		fmt.Println("daemon not running, port is free")
-		return nil
+		return false, nil
 	}
 	resp.Body.Close()
 	if resp.StatusCode != http.StatusNoContent {
-		return fmt.Errorf("release: %s", resp.Status)
+		return true, fmt.Errorf("release: %s", resp.Status)
 	}
 	// the daemon closes the port asynchronously
 	for i := 0; i < 20; i++ {
@@ -269,7 +286,61 @@ func runRelease(cfg config.Config, args []string) error {
 		}
 		time.Sleep(100 * time.Millisecond)
 	}
-	fmt.Printf("serial port released for %ds\n", sec)
+	return true, nil
+}
+
+const launcherReleaseSec = 10
+
+// launcherReleaseSeconds is how long to release the daemon's port for: 0 keeps a longer
+// release that is already running, e.g. one for flashing.
+func launcherReleaseSeconds(st serial.Status, now time.Time) int {
+	if st.Released-now.Unix() >= launcherReleaseSec {
+		return 0
+	}
+	return launcherReleaseSec
+}
+
+func retry[T any](try func() (T, error), every, timeout time.Duration) (T, error) {
+	deadline := time.Now().Add(timeout)
+	for {
+		v, err := try()
+		if err == nil || time.Now().After(deadline) {
+			return v, err
+		}
+		time.Sleep(every)
+	}
+}
+
+// runLauncher resets the board into cyd-launcher's menu, which replaces its RST button.
+func runLauncher(cfg config.Config, args []string) error {
+	var st serial.Status
+	_ = getJSON(cfg, "/device", &st)
+	path := st.Port
+	if len(args) > 0 {
+		path = args[0]
+	}
+	if path == "" {
+		ports := serial.Ports(cfg.Serial)
+		if len(ports) == 0 {
+			return errors.New("launcher: no serial device found")
+		}
+		path = ports[0]
+	}
+	if sec := launcherReleaseSeconds(st, time.Now()); sec > 0 {
+		if _, err := releasePort(cfg, sec); err != nil {
+			return err
+		}
+	}
+	// a probe of the daemon may still hold the port for up to its 6 s hello timeout
+	p, err := retry(func() (bugst.Port, error) { return serial.OpenResettable(path, cfg.Baud) }, 250*time.Millisecond, 8*time.Second)
+	if err != nil {
+		return fmt.Errorf("launcher: %w (another program such as pcstats may hold the port)", err)
+	}
+	defer p.Close()
+	if err := serial.ReturnToLauncher(p, serial.DefaultResetTiming); err != nil {
+		return fmt.Errorf("launcher: %w", err)
+	}
+	fmt.Println("launcher menu open on", path)
 	return nil
 }
 

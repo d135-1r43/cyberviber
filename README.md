@@ -62,6 +62,7 @@ cyberviber layout tiling       # waybar, tiling, btop, walker, hyprlock ('cyberv
 cyberviber theme nord          # 'cyberviber theme list' lists all eleven
 cyberviber brightness 60       # backlight in percent
 cyberviber usb bottom          # turn the screen so the USB port points down (or: top)
+cyberviber launcher            # reset into the cyd-launcher menu (replaces the RST button)
 cyberviber dim 15              # dim after 15 min without activity ('off' never dims)
 cyberviber screenshot out.png  # the device screen as PNG (~20 s)
 cyberviber release   # free the device's serial port for 60 s (e.g. to flash it)

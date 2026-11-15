@@ -457,19 +457,23 @@ func listPorts(path, hub string) []string {
 	return out
 }
 
+func quietMode(baud int) *bugst.Mode {
+	return &bugst.Mode{
+		BaudRate:          baud,
+		DataBits:          8,
+		Parity:            bugst.NoParity,
+		StopBits:          bugst.OneStopBit,
+		InitialStatusBits: &bugst.ModemOutputBits{DTR: false, RTS: false},
+	}
+}
+
 // openPort opens the port with DTR and RTS inactive, so the ESP32 auto-reset circuit
 // (EN and IO0 driven from RTS/DTR) does not reset the board or put it into the bootloader.
 func openPort(path string, baud int) (Port, error) {
 	if isSocket(path) {
 		return net.Dial("unix", path)
 	}
-	p, err := bugst.Open(path, &bugst.Mode{
-		BaudRate:          baud,
-		DataBits:          8,
-		Parity:            bugst.NoParity,
-		StopBits:          bugst.OneStopBit,
-		InitialStatusBits: &bugst.ModemOutputBits{DTR: false, RTS: false},
-	})
+	p, err := bugst.Open(path, quietMode(baud))
 	if err != nil {
 		return nil, fmt.Errorf("open %s: %w", path, err)
 	}
