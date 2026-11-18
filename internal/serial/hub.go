@@ -35,13 +35,35 @@ func isSocket(path string) bool {
 }
 
 func hubRelease(sock string, d time.Duration) error {
+	return hubCommand(sock, map[string]any{"type": "hub", "cmd": "release", "seconds": int(d / time.Second)})
+}
+
+// HubLauncher asks the hub to reset the board into cyd-launcher's menu.
+func HubLauncher(sock string) error {
+	return hubCommand(sock, map[string]any{"type": "hub", "cmd": "launcher"})
+}
+
+// HubRunning reports whether a hub answers on sock; a killed hub can leave the socket file behind.
+func HubRunning(sock string) bool {
+	if !isSocket(sock) {
+		return false
+	}
+	c, err := net.DialTimeout("unix", sock, 500*time.Millisecond)
+	if err != nil {
+		return false
+	}
+	c.Close()
+	return true
+}
+
+func hubCommand(sock string, req map[string]any) error {
 	c, err := net.DialTimeout("unix", sock, time.Second)
 	if err != nil {
 		return err
 	}
 	defer c.Close()
 	_ = c.SetDeadline(time.Now().Add(3 * time.Second))
-	b, _ := json.Marshal(map[string]any{"type": "hub", "cmd": "release", "seconds": int(d / time.Second)})
+	b, _ := json.Marshal(req)
 	if _, err := c.Write(append(b, '\n')); err != nil {
 		return err
 	}

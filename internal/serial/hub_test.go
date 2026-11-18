@@ -192,3 +192,46 @@ func TestShouldKeepAnExplicitPortAlthoughTheHubRuns(t *testing.T) {
 	case <-time.After(200 * time.Millisecond):
 	}
 }
+
+func TestShouldAskTheHubToOpenTheLauncherMenu(t *testing.T) {
+	sock, conns := fakeHub(t)
+	got := make(chan []byte, 1)
+	go func() {
+		c := <-conns
+		defer c.Close()
+		line, _ := bufio.NewReader(c).ReadBytes('\n')
+		got <- line
+		c.Write([]byte(`{"ok":true}` + "\n"))
+	}()
+
+	if err := HubLauncher(sock); err != nil {
+		t.Fatal(err)
+	}
+	if line := <-got; string(line) != `{"cmd":"launcher","type":"hub"}`+"\n" {
+		t.Fatalf("request = %s", line)
+	}
+}
+
+func TestShouldReportTheHubsError(t *testing.T) {
+	sock, conns := fakeHub(t)
+	go func() {
+		c := <-conns
+		defer c.Close()
+		bufio.NewReader(c).ReadBytes('\n')
+		c.Write([]byte(`{"ok":false,"error":"no board"}` + "\n"))
+	}()
+
+	if err := HubLauncher(sock); err == nil || err.Error() != "hub: no board" {
+		t.Fatalf("err = %v", err)
+	}
+}
+
+func TestShouldNotSeeAHubBehindAStaleSocket(t *testing.T) {
+	sock, _ := fakeHub(t)
+	if !HubRunning(sock) {
+		t.Fatal("hub runs")
+	}
+	if HubRunning(sock + ".gone") {
+		t.Fatal("no hub there")
+	}
+}

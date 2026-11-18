@@ -313,6 +313,13 @@ func retry[T any](try func() (T, error), every, timeout time.Duration) (T, error
 
 // runLauncher resets the board into cyd-launcher's menu, which replaces its RST button.
 func runLauncher(cfg config.Config, args []string) error {
+	if sock := serial.HubSocket(os.Getenv); len(args) == 0 && serial.HubRunning(sock) {
+		if err := serial.HubLauncher(sock); err != nil {
+			return fmt.Errorf("launcher: %w", err)
+		}
+		fmt.Println("launcher menu open")
+		return nil
+	}
 	var st serial.Status
 	_ = getJSON(cfg, "/device", &st)
 	path := st.Port
