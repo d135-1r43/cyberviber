@@ -18,7 +18,7 @@ type herdr struct{}
 // herdr-client.sock next to the API socket.
 func (herdr) Focus(f *Focuser, loc mux.Location) []int {
 	clientSock := filepath.Join(filepath.Dir(loc.Session), "herdr-client.sock")
-	clients := f.socketClients("herdr", func(path string) bool { return path == clientSock })
+	clients := f.socketClients("herdr", func(path string, _ int) bool { return path == clientSock })
 	if loc.Pane != "" {
 		if err := herdrCall(loc.Session, "pane.focus", map[string]string{"pane_id": loc.Pane}); err != nil {
 			log.Printf("focus: herdr pane.focus %s: %v", loc.Pane, err)

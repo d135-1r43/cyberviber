@@ -94,7 +94,8 @@ n/var/folders/T/zellij-501/contract_version_1/other
 func TestShouldMapSocketPathsToClients(t *testing.T) {
 	got := ParseLsof(lsofOut)
 	drum := got["/var/folders/T/zellij-501/contract_version_1/sincere-drum"]
-	if len(drum) != 1 || drum[0] != 61652 || len(got["/var/folders/T/zellij-501/contract_version_1/other"]) != 0 {
+	if len(drum.Clients) != 1 || drum.Clients[0] != 61652 || drum.Server != 98824 ||
+		len(got["/var/folders/T/zellij-501/contract_version_1/other"].Clients) != 0 {
 		t.Fatalf("%v", got)
 	}
 }
@@ -109,7 +110,7 @@ func TestShouldListEachClientOncePerSocketPath(t *testing.T) {
 	got := ParseLsof(out)
 
 	// then
-	if len(got) != 2 || len(got["/s/one"]) != 1 || got["/s/one"][0] != 5 || len(got["/s/two"]) != 1 || got["/s/two"][0] != 6 {
+	if len(got) != 2 || len(got["/s/one"].Clients) != 1 || got["/s/one"].Clients[0] != 5 || len(got["/s/two"].Clients) != 1 || got["/s/two"].Clients[0] != 6 {
 		t.Fatalf("%v", got)
 	}
 }
@@ -257,6 +258,41 @@ func TestShouldFocusZellijPaneThenTabbyTab(t *testing.T) {
 	}
 	if len(*seen) != 1 || (*seen)[0].PIDs[0] != 90 {
 		t.Fatalf("plugin must get the client chain: %+v", *seen)
+	}
+}
+
+func TestShouldFindZellijClientBehindHashedSocketName(t *testing.T) {
+	// given zellij 0.46 names its socket by a hash; only server 98's env names the session
+	get := table(
+		proc.Proc{PID: 100, PPID: 1, Name: "claude"},
+		proc.Proc{PID: 90, PPID: 80, Name: "zellij", TTY: "ttys015", Exe: "/opt/homebrew/bin/zellij"},
+		proc.Proc{PID: 80, PPID: 70, Name: "zsh"},
+		proc.Proc{PID: 70, PPID: 1, Name: "Tabby", Exe: tabbyExe},
+	)
+	lsof := "p98\nf5\nd0xa\nn/T/zellij-501/contract_version_1/cdfa29d86a1c\n" +
+		"p97\nf5\nd0xb\nn/T/zellij-501/contract_version_1/0123456789ab\n" +
+		"p90\nf5\nd0x1\nn->0xa\n" +
+		"p91\nf5\nd0x2\nn->0xb\n"
+	r := &recorder{answers: map[string]string{"lsof": lsof}}
+	dir := shortTempDir(t)
+	fakePlugin(t, dir, 80)
+	f := newFocuser(session.Session{ID: "s1", PID: 100, Mux: mux.Location{Kind: "zellij", Session: "marvellous-accordion", Pane: "2"}}, get, nil, r, dir)
+	f.Env = func(pid int) map[string]string {
+		switch pid {
+		case 98:
+			return map[string]string{"ZELLIJ_SESSION_NAME": "marvellous-accordion"}
+		case 97:
+			return map[string]string{"ZELLIJ_SESSION_NAME": "other"}
+		}
+		return nil
+	}
+
+	// when
+	res := f.Focus("s1")
+
+	// then
+	if !res.OK || res.Terminal != "tabby" {
+		t.Fatalf("%+v calls=%v", res, r.calls)
 	}
 }
 
@@ -455,7 +491,7 @@ u_str ESTAB 0      0                                 * 190003 * 0 users:(("herdr
 
 func TestShouldMapSsSocketsToClientsOfCommand(t *testing.T) {
 	got := ParseSS(ssOut, "herdr")
-	if c := got["/run/user/1000/herdr/herdr-client.sock"]; len(got) != 1 || len(c) != 1 || c[0] != 266 {
+	if c := got["/run/user/1000/herdr/herdr-client.sock"]; len(got) != 1 || len(c.Clients) != 1 || c.Clients[0] != 266 || c.Server != 265 {
 		t.Fatalf("%v", got)
 	}
 }

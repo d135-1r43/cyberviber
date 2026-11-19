@@ -13,8 +13,13 @@ type zellij struct{}
 // Focus runs `zellij action focus-pane-id`, which also switches to the pane's tab. It uses the
 // attached client's own binary (same version); launchd agents have a minimal PATH.
 func (zellij) Focus(f *Focuser, loc mux.Location) []int {
-	clients := f.socketClients("zellij", func(path string) bool {
-		return strings.Contains(path, "/zellij") && filepath.Base(path) == loc.Session
+	clients := f.socketClients("zellij", func(path string, server int) bool {
+		if !strings.Contains(path, "/zellij") {
+			return false
+		}
+		// zellij ≥ 0.46 names the socket by a hash; its server still carries the session name
+		return filepath.Base(path) == loc.Session ||
+			(server != 0 && f.Env(server)["ZELLIJ_SESSION_NAME"] == loc.Session)
 	})
 	bin := ""
 	if len(clients) > 0 {

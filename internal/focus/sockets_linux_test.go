@@ -35,7 +35,7 @@ func TestShouldFindSocketClientsWithRealSS(t *testing.T) {
 	}}
 
 	// when
-	got := f.socketClients(string(comm[:len(comm)-1]), func(p string) bool { return p == sock })
+	got := f.socketClients(string(comm[:len(comm)-1]), func(p string, _ int) bool { return p == sock })
 
 	// then
 	if len(got) != 1 || got[0] != os.Getpid() {
