@@ -625,7 +625,9 @@ func warpFocuser(t *testing.T, run func(call, marker string) ([]byte, error)) (*
 	t.Helper()
 	get := table(
 		proc.Proc{PID: 100, PPID: 80, Name: "claude", TTY: "ttys005"},
-		proc.Proc{PID: 80, PPID: 70, Name: "zsh"},
+		proc.Proc{PID: 80, PPID: 71, Name: "zsh"},
+		// shells run under Warp's terminal-server, a child of the GUI process that owns the windows
+		proc.Proc{PID: 71, PPID: 70, Name: "stable", Exe: warpExe},
 		proc.Proc{PID: 70, PPID: 1, Name: "stable", Exe: warpExe},
 	)
 	marker := ""
@@ -704,6 +706,24 @@ func TestShouldReportMissingAccessibilityForWarp(t *testing.T) {
 		}
 	}
 	if res.Reason != "no-accessibility" || n != 1 || (*calls)[len(*calls)-1] != "open -a /Applications/Warp.app" {
+		t.Fatalf("%+v %v", res, *calls)
+	}
+}
+
+func TestShouldReportMissingAutomationPermissionForWarp(t *testing.T) {
+	// given macOS refuses the daemon's Apple events to System Events
+	f, calls, _ := warpFocuser(t, func(call, _ string) ([]byte, error) {
+		if strings.HasPrefix(call, "osascript") {
+			return []byte("execution error: Not authorized to send Apple events to System Events. (-1743)"), errors.New("exit status 1")
+		}
+		return nil, nil
+	})
+
+	// when
+	res := f.Focus("s1")
+
+	// then
+	if res.Reason != "no-automation" || (*calls)[len(*calls)-1] != "open -a /Applications/Warp.app" {
 		t.Fatalf("%+v %v", res, *calls)
 	}
 }

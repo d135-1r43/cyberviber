@@ -13,7 +13,7 @@ import (
 // Result of a focus request. Reason is set when OK is false.
 type Result struct {
 	OK       bool
-	Reason   string // not-found, no-process, detached, unknown-terminal, no-plugin, no-remote-control, no-accessibility, tab-not-found
+	Reason   string // not-found, no-process, detached, unknown-terminal, no-plugin, no-remote-control, no-accessibility, no-automation, tab-not-found
 	Terminal string
 	Mux      string
 	Tab      int
