@@ -1,6 +1,6 @@
 # cyberviber
 
-Claude Code session manager for a 2.4" ESP32 touch display (ESP32-2432S024, 240×320). It lists all running Claude Code sessions, shows their state (needs you / ready / working / idle), and tapping one brings its terminal to the front: zellij or herdr pane, then the Tabby tab, Ghostty or kitty window.
+Claude Code session manager for a 2.4" ESP32 touch display (ESP32-2432S024, 240×320). It lists all running Claude Code sessions, shows their state (needs you / ready / working / idle), and tapping one brings its terminal to the front: zellij or herdr pane, then the Tabby tab, Ghostty or kitty window. In Warp it raises the window when the session's tab is the active one there; Warp exposes no tabs to other apps, and the daemon needs Accessibility permission (System Settings → Privacy & Security).
 
 Website: https://cyberviber.de (source in [site/](site/index.html))
 
