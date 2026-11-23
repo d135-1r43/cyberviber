@@ -10,8 +10,8 @@ constexpr int TOUCH_CS = 33, TOUCH_IRQ = 36;
 
 #if defined(CV_BOARD_CYD28R)
 // ESP32-2432S028R: TFT on HSPI, XPT2046 touch on its own pins (VSPI), backlight on GPIO 21.
-// The panel's memory is 240×320 (portrait). Rotation, colour order, inversion and read-back are
-// the values found on the unit in Task 3 of docs/superpowers/plans/2026-11-23-cyd28r-board-support.md.
+// Verified on a dual-USB (USB-C + micro-USB) unit: ILI9341 with 240×320 (portrait) memory; rotation 0
+// shows it upright with the USB port at the top; BGR, not inverted.
 #ifndef CV_ROTATION
 #define CV_ROTATION 0
 #endif
