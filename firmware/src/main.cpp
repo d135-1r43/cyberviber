@@ -151,14 +151,16 @@ static void sendScreenshot(int from, int rows) {
   from = LV_CLAMP(0, from - from % N, H);
   int to = LV_MIN(H, from + rows);
   for (int y = from; y < to; y += N) {
-    // This panel's read-back is shifted by one byte: what arrives as (r, g, b) is really (b, r, g).
     if (usbBottom) {  // the panel holds the picture turned by 180°
       tft.readRect(0, H - N - y, W, N, rgb);
       std::reverse(rgb, rgb + W * N);
     } else {
       tft.readRect(0, y, W, N, rgb);
     }
-    for (int i = 0; i < W * N; i++) px[i] = (rgb[i].g >> 3) << 11 | (rgb[i].b >> 2) << 5 | rgb[i].r >> 3;
+    for (int i = 0; i < W * N; i++)
+      px[i] = board::READBACK_SHIFTED  // see board_config.h
+                  ? (rgb[i].g >> 3) << 11 | (rgb[i].b >> 2) << 5 | rgb[i].r >> 3
+                  : (rgb[i].r >> 3) << 11 | (rgb[i].g >> 2) << 5 | rgb[i].b >> 3;
     size_t len = 0;
     mbedtls_base64_encode(b64, sizeof b64, &len, (const unsigned char*)px, sizeof px);
     Serial.printf("{\"type\":\"shot\",\"w\":%d,\"h\":%d,\"y\":%d,\"n\":%d,\"data\":\"", W, H, y, N);
