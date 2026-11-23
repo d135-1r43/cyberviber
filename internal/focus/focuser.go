@@ -13,7 +13,7 @@ import (
 // Result of a focus request. Reason is set when OK is false.
 type Result struct {
 	OK       bool
-	Reason   string // not-found, no-process, detached, unknown-terminal, no-plugin, no-remote-control, tab-not-found
+	Reason   string // not-found, no-process, detached, unknown-terminal, no-plugin, no-remote-control, no-accessibility, no-automation, tab-not-found
 	Terminal string
 	Mux      string
 	Tab      int
@@ -34,7 +34,7 @@ type App interface {
 
 var (
 	multiplexers = map[string]Multiplexer{"zellij": zellij{}, "herdr": herdr{}}
-	apps         = map[string]App{"tabby": tabby{}, "ghostty": ghostty{}, "kitty": kitty{}}
+	apps         = map[string]App{"tabby": tabby{}, "ghostty": ghostty{}, "kitty": kitty{}, "warp": warp{}}
 )
 
 type Focuser struct {

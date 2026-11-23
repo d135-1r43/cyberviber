@@ -618,3 +618,112 @@ func TestShouldTellFootServerWindowsApartByTitleMarker(t *testing.T) {
 		t.Fatalf("%+v %v", res, calls)
 	}
 }
+
+const warpExe = "/Applications/Warp.app/Contents/MacOS/stable"
+
+func warpFocuser(t *testing.T, run func(call, marker string) ([]byte, error)) (*Focuser, *[]string, *string) {
+	t.Helper()
+	get := table(
+		proc.Proc{PID: 100, PPID: 80, Name: "claude", TTY: "ttys005"},
+		proc.Proc{PID: 80, PPID: 71, Name: "zsh"},
+		// shells run under Warp's terminal-server, a child of the GUI process that owns the windows
+		proc.Proc{PID: 71, PPID: 70, Name: "stable", Exe: warpExe},
+		proc.Proc{PID: 70, PPID: 1, Name: "stable", Exe: warpExe},
+	)
+	marker := ""
+	old := writeTitle
+	writeTitle = func(tty, title string) error {
+		if tty != "ttys005" {
+			t.Errorf("title written to %s", tty)
+		}
+		marker = title
+		return nil
+	}
+	t.Cleanup(func() { writeTitle = old })
+	var calls []string
+	f := &Focuser{
+		Lookup: func(id string) (session.Session, bool) { return session.Session{ID: "s1", PID: 100}, true },
+		Get:    get, Env: func(int) map[string]string { return nil }, GOOS: "darwin",
+		Run: func(name string, args ...string) ([]byte, error) {
+			call := name + " " + strings.Join(args, " ")
+			calls = append(calls, call)
+			return run(call, marker)
+		},
+	}
+	return f, &calls, &marker
+}
+
+func TestShouldRaiseWarpWindowByTitleMarker(t *testing.T) {
+	// given Warp (70) shows the session's tab, so its window title carries the marker
+	f, calls, marker := warpFocuser(t, func(call, marker string) ([]byte, error) {
+		if marker != "" && strings.Contains(call, marker) && strings.Contains(call, "unix id is 70") {
+			return []byte("ok\n"), nil
+		}
+		return nil, nil
+	})
+
+	// when
+	res := f.Focus("s1")
+
+	// then the window is raised, then Warp is brought to the front
+	all := strings.Join(*calls, "\n")
+	if !res.OK || res.Terminal != "warp" || *marker == "" || !strings.Contains(all, "AXRaise") ||
+		(*calls)[len(*calls)-1] != "open -a /Applications/Warp.app" {
+		t.Fatalf("%+v %v", res, *calls)
+	}
+}
+
+func TestShouldActivateWarpWhenSessionTabIsNotFrontmost(t *testing.T) {
+	// given no Warp window title ever shows the marker (the session's tab is in the background)
+	f, calls, _ := warpFocuser(t, func(string, string) ([]byte, error) { return nil, nil })
+
+	// when
+	res := f.Focus("s1")
+
+	// then
+	if res.OK || res.Reason != "tab-not-found" || (*calls)[len(*calls)-1] != "open -a /Applications/Warp.app" {
+		t.Fatalf("%+v %v", res, *calls)
+	}
+}
+
+func TestShouldReportMissingAccessibilityForWarp(t *testing.T) {
+	// given macOS refuses System Events access to the daemon
+	f, calls, _ := warpFocuser(t, func(call, _ string) ([]byte, error) {
+		if strings.HasPrefix(call, "osascript") {
+			return []byte("execution error: System Events got an error: osascript is not allowed assistive access. (-1719)"), errors.New("exit status 1")
+		}
+		return nil, nil
+	})
+
+	// when
+	res := f.Focus("s1")
+
+	// then it asks once, does not keep polling, and still brings Warp forward
+	n := 0
+	for _, c := range *calls {
+		if strings.HasPrefix(c, "osascript") {
+			n++
+		}
+	}
+	if res.Reason != "no-accessibility" || n != 1 || (*calls)[len(*calls)-1] != "open -a /Applications/Warp.app" {
+		t.Fatalf("%+v %v", res, *calls)
+	}
+}
+
+func TestShouldReportMissingAutomationPermissionForWarp(t *testing.T) {
+	// given macOS refuses the daemon's Apple events to System Events
+	f, calls, _ := warpFocuser(t, func(call, _ string) ([]byte, error) {
+		if strings.HasPrefix(call, "osascript") {
+			return []byte("execution error: Not authorized to send Apple events to System Events. (-1743)"), errors.New("exit status 1")
+		}
+		return nil, nil
+	})
+
+	// when
+	res := f.Focus("s1")
+
+	// then
+	if res.Reason != "no-automation" || (*calls)[len(*calls)-1] != "open -a /Applications/Warp.app" {
+		t.Fatalf("%+v %v", res, *calls)
+	}
+}
