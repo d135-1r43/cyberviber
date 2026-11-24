@@ -618,3 +618,71 @@ func TestShouldTellFootServerWindowsApartByTitleMarker(t *testing.T) {
 		t.Fatalf("%+v %v", res, calls)
 	}
 }
+
+const orcaHostExe = "/Users/m/Library/Application Support/orca/daemon-host/macos/terminal-host-abc/app.noindex/Orca Agents.app/Contents/MacOS/Orca Agents"
+
+func orcaFocuser(env map[string]string, r *recorder) *Focuser {
+	// claude runs in a login shell spawned by Orca's terminal host, a helper app outside Orca.app
+	get := table(
+		proc.Proc{PID: 100, PPID: 80, Name: "claude", TTY: "ttys002"},
+		proc.Proc{PID: 80, PPID: 81, Name: "zsh"},
+		proc.Proc{PID: 81, PPID: 70, Name: "login", Exe: "/usr/bin/login"},
+		proc.Proc{PID: 70, PPID: 1, Name: "Orca Agents", Exe: orcaHostExe},
+	)
+	return &Focuser{
+		Lookup: func(id string) (session.Session, bool) { return session.Session{ID: "s1", PID: 100}, true },
+		Get:    get, Env: func(int) map[string]string { return env }, Run: r.run, GOOS: "darwin",
+	}
+}
+
+func TestShouldSwitchOrcaToTheSessionsTerminalThenActivateOrca(t *testing.T) {
+	// given the session's environment names its Orca terminal and Orca's CLI
+	r := &recorder{answers: map[string]string{"terminal switch": `{"ok": true}`}}
+	f := orcaFocuser(map[string]string{
+		"ORCA_TERMINAL_HANDLE": "term_abc",
+		"ORCA_CLI_BIN_DIR":     "/Applications/Orca.app/Contents/Resources/bin",
+	}, r)
+
+	// when
+	res := f.Focus("s1")
+
+	// then Orca's UI switches to that terminal and Orca.app (not the terminal host) comes forward
+	want := []string{
+		"/Applications/Orca.app/Contents/Resources/bin/orca terminal switch --terminal term_abc --json",
+		"open -a /Applications/Orca.app",
+	}
+	if !res.OK || res.Terminal != "orca agents" || strings.Join(r.calls, "\n") != strings.Join(want, "\n") {
+		t.Fatalf("%+v %v", res, r.calls)
+	}
+}
+
+func TestShouldActivateOrcaWhenTheTerminalSwitchFails(t *testing.T) {
+	// given Orca answers that the terminal is gone
+	r := &recorder{answers: map[string]string{"terminal switch": `{"ok": false}`}}
+	f := orcaFocuser(map[string]string{
+		"ORCA_TERMINAL_HANDLE": "term_gone",
+		"ORCA_CLI_BIN_DIR":     "/Applications/Orca.app/Contents/Resources/bin",
+	}, r)
+
+	// when
+	res := f.Focus("s1")
+
+	// then
+	if res.OK || res.Reason != "tab-not-found" || r.calls[len(r.calls)-1] != "open -a /Applications/Orca.app" {
+		t.Fatalf("%+v %v", res, r.calls)
+	}
+}
+
+func TestShouldActivateOrcaWithoutATerminalHandle(t *testing.T) {
+	// given an environment without Orca's variables (e.g. unreadable)
+	r := &recorder{}
+	f := orcaFocuser(nil, r)
+
+	// when
+	res := f.Focus("s1")
+
+	// then it does not guess a terminal and falls back to the default Orca.app
+	if res.OK || res.Reason != "tab-not-found" || strings.Join(r.calls, "\n") != "open -a /Applications/Orca.app" {
+		t.Fatalf("%+v %v", res, r.calls)
+	}
+}
