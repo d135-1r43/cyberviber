@@ -34,7 +34,7 @@ type App interface {
 
 var (
 	multiplexers = map[string]Multiplexer{"zellij": zellij{}, "herdr": herdr{}}
-	apps         = map[string]App{"tabby": tabby{}, "ghostty": ghostty{}, "kitty": kitty{}}
+	apps         = map[string]App{"tabby": tabby{}, "ghostty": ghostty{}, "kitty": kitty{}, "orca agents": orca{}}
 )
 
 type Focuser struct {
